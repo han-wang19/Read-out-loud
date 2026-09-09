@@ -297,7 +297,7 @@ function ensureOcrAssets(base,onProgress){
   const assets=[
     ['OCR Worker',new URL('vendor/tesseract/worker.min.js',base).href,50000],
     ['OCR 核心',new URL('vendor/tesseract/core/tesseract-core-lstm.wasm.js',base).href,1000000],
-    ['英文模型',new URL('vendor/tesseract/lang/eng.traineddata.gz',base).href,1000000]
+    ['英文模型',new URL('vendor/tesseract/lang/eng.traineddata',base).href,1000000]
   ];
   ocrAssetsPromise=Promise.all(assets.map(async([name,url,minBytes],index)=>{onProgress(name,index+1,assets.length);const response=await withOcrTimeout(fetch(url,{cache:'force-cache'}),45000,`${name}下载`);if(!response.ok)throw new Error(`${name}文件无法访问（HTTP ${response.status}）`);const data=await withOcrTimeout(response.arrayBuffer(),45000,`${name}读取`);if(data.byteLength<minBytes)throw new Error(`${name}文件不完整，请重新部署网站`);return url})).catch(error=>{ocrAssetsPromise=null;throw error});
   return ocrAssetsPromise;
@@ -313,7 +313,7 @@ function getOcrWorker(base,onProgress){
   if(ocrWorker)return Promise.resolve(ocrWorker);
   if(!ocrWorkerPromise){
     const generation=ocrWorkerGeneration;
-    const createAttempt=workerBlobURL=>Tesseract.createWorker('eng',1,{workerPath:new URL('vendor/tesseract/worker.min.js',base).href,corePath:new URL('vendor/tesseract/core/tesseract-core-lstm.wasm.js',base).href,langPath:new URL('vendor/tesseract/lang',base).href,workerBlobURL,errorHandler:error=>ocrProgressReporter({error}),logger:message=>ocrProgressReporter(message)})
+    const createAttempt=workerBlobURL=>Tesseract.createWorker('eng',1,{workerPath:new URL('vendor/tesseract/worker.min.js',base).href,corePath:new URL('vendor/tesseract/core/tesseract-core-lstm.wasm.js',base).href,langPath:new URL('vendor/tesseract/lang',base).href,gzip:false,workerBlobURL,errorHandler:error=>ocrProgressReporter({error}),logger:message=>ocrProgressReporter(message)})
       .then(async worker=>{if(generation!==ocrWorkerGeneration){await worker.terminate();throw new Error('OCR 初始化已取消')}await worker.setParameters({tessedit_pageseg_mode:Tesseract.PSM.SINGLE_BLOCK,preserve_interword_spaces:'1'});ocrWorker=worker;return worker});
     const pending=withOcrTimeout(createAttempt(false),40000,'引擎初始化尝试').catch(async firstError=>{
       if(generation!==ocrWorkerGeneration)throw firstError;
