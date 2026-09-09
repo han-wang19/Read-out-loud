@@ -71,7 +71,7 @@ const savedFavorites=readLocalJson('readingFavorites',[]);
 const favorites=new Set(Array.isArray(savedFavorites)?savedFavorites:[]);
 const lookupCache = new Map(), translationCache = new Map();
 let cardRequest = 0;
-let cloudUser = null, cloudSyncTimer = null;
+let cloudUser = null, cloudSyncTimer = null, cloudSyncInterval = null, cloudSyncPromise = null;
 const submissionStatuses = new Map();
 const publicPassageIds = new Set();
 let ocrWorker = null, ocrWorkerPromise = null, ocrRunId = 0, ocrWorkerGeneration = 0;
@@ -79,7 +79,7 @@ let ocrProgressReporter = () => {};
 
 function toast(message){const t=$('#toast');t.textContent=message;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1900)}
 function splitSentences(text){return text.match(/[^.!?]+[.!?]+|[^.!?]+$/g)||[text]}
-function displayType(type){return type==='我的文章'?'我的创作':['社区精选','社区拾光'].includes(type)?'社区拾光':type}
+function displayType(type){return type==='我的文章'?'我的创作':['社区精选','社区拾光'].includes(type)?'社区精选':type}
 function matchesFilter(passage){if(filter==='all')return true;if(filter==='mine')return passage.type==='我的文章';if(filter==='community')return ['社区精选','社区拾光'].includes(passage.type);return passage.type===filter}
 function scoreSummary(id){const saved=progress[id];if(!saved)return'';const parts=[];if(saved.score!=null)parts.push(`朗读 ${saved.score}分`);if(saved.questionResults?.length)parts.push(`问答 ${saved.questionScore||0}/6`);return parts.length?`<strong class="passage-score">${escapeHtml(parts.join(' · '))}</strong>`:''}
 function renderList(){
@@ -97,7 +97,7 @@ function selectPassage(id){
   $('#recordLabel').textContent='点击开始录音（自动识别和评分）';
   $('#sourceBadge').textContent=displayType(current.type); $('#passageTitle').textContent=current.title;
   $('#passageMeta').textContent=`${current.year} · ${current.topic} · ${current.level}`;
-  const sentences=splitSentences(current.text); $('#passageText').innerHTML=sentences.map((s,i)=>`<span class="sentence" data-index="${i}">${escapeHtml(s.trim())} </span>`).join('');
+  const sentences=splitSentences(current.text); $('#passageText').innerHTML=sentences.map((s,i)=>`<span class="sentence" data-index="${i}">${escapeHtml(s)}</span>`).join('');
   $('#wordCount').textContent=current.text.trim().split(/\s+/).length;
   renderQuestions();
   $('#favoriteBtn').textContent=favorites.has(id)?'♥':'♡';renderArticleVocabulary();
@@ -142,9 +142,19 @@ function speakWord(word){
   const voices=synthesis.getVoices();voiceLine.voice=voices.find(v=>v.lang==='en-US')||voices.find(v=>v.lang.startsWith('en'))||null;
   synthesis.speak(voiceLine);
 }
-function vocabularyButtons(words,emptyText='还没有记录'){return words?.length?words.map(word=>`<button type="button" data-vocab-word="${escapeHtml(word)}">${escapeHtml(word)} <span>▶</span></button>`).join(''):`<p>${emptyText}</p>`}
+function vocabularyDetail(word,mode){
+  const details=getLocalWordDetails(word);
+  if(mode==='pronunciation'){
+    const phonetic=details?.phonetic&&!details.phonetic.includes('暂无')?details.phonetic:'';
+    return phonetic?(/[\/\[\]]/.test(phonetic)?phonetic:`/${phonetic}/`):'暂无音标';
+  }
+  return details?.chinese||'暂无词性与汉译';
+}
+function vocabularyRows(words,mode,emptyText='还没有记录'){
+  return words?.length?words.map(word=>`<div class="vocabulary-row"><button type="button" data-vocab-word="${escapeHtml(word)}" aria-label="朗读 ${escapeHtml(word)}">${escapeHtml(word)}</button><span>${escapeHtml(vocabularyDetail(word,mode))}</span></div>`).join(''):`<p>${emptyText}</p>`
+}
 function renderArticleVocabulary(){
-  const saved=progress[current.id]||{};$('#articlePronunciationWords').innerHTML=vocabularyButtons(saved.unpronounceableWords);$('#articleMeaningWords').innerHTML=vocabularyButtons(saved.unknownWords);$('#wordMarkStatus').textContent='尚未进入单词标记模式。';$('#finishWordMarkBtn').hidden=true;$('#markPronunciationBtn').classList.remove('active');$('#markMeaningBtn').classList.remove('active')
+  const saved=progress[current.id]||{};$('#articlePronunciationWords').innerHTML=vocabularyRows(saved.unpronounceableWords,'pronunciation');$('#articleMeaningWords').innerHTML=vocabularyRows(saved.unknownWords,'meaning');$('#wordMarkStatus').textContent='尚未进入单词标记模式。';$('#finishWordMarkBtn').hidden=true;$('#markPronunciationBtn').classList.remove('active');$('#markMeaningBtn').classList.remove('active')
 }
 function renderSelectablePassage(){
   const box=$('#passageText');box.textContent='';let last=0;const rx=/[A-Za-z]+(?:[’'][A-Za-z]+)?/g;let match;
@@ -158,7 +168,7 @@ function finishWordMark(){
   if(!wordMarkMode)return;const previous=progress[current.id]||{},key=wordMarkMode==='pronunciation'?'unpronounceableWords':'unknownWords';progress[current.id]={...previous,date:new Date().toISOString(),[key]:[...wordMarkSelection].sort()};localStorage.setItem('readingProgress',JSON.stringify(progress));wordMarkMode=null;$('#doneCount').textContent=Object.keys(progress).length;scheduleCloudSync();selectPassage(current.id);renderVocabularyBook();toast(cloudUser?'生词记录已保存并等待同步':'生词记录已保存在本机')
 }
 function renderVocabularyBook(){
-  const pronunciation=new Set(),meaning=new Set();Object.values(progress).forEach(item=>{(item.unpronounceableWords||[]).forEach(word=>pronunciation.add(word));(item.unknownWords||[]).forEach(word=>meaning.add(word))});$('#bookPronunciationWords').innerHTML=vocabularyButtons([...pronunciation].sort(),'还没有“不会读”的单词');$('#bookMeaningWords').innerHTML=vocabularyButtons([...meaning].sort(),'还没有“不认识”的单词')
+  const pronunciation=new Set(),meaning=new Set();Object.values(progress).forEach(item=>{(item.unpronounceableWords||[]).forEach(word=>pronunciation.add(word));(item.unknownWords||[]).forEach(word=>meaning.add(word))});$('#bookPronunciationWords').innerHTML=vocabularyRows([...pronunciation].sort(),'pronunciation','还没有“不会读”的单词');$('#bookMeaningWords').innerHTML=vocabularyRows([...meaning].sort(),'meaning','还没有“不认识”的单词')
 }
 function openVocabularyBook(){closeLearningCard();renderVocabularyBook();$('#vocabBookModal').hidden=false}
 function closeVocabularyBook(){$('#vocabBookModal').hidden=true}
@@ -338,27 +348,39 @@ async function apiRequest(path,options={}){
 function setSyncStatus(message,error=false){const box=$('#syncStatus');box.textContent=message;box.classList.toggle('error',error)}
 function cloudState(){return{articles:customPassages,progress}}
 function mergeCloudState(remote={}){
-  const articles=new Map((remote.articles||[]).map(item=>[item.id,item]));customPassages.forEach(item=>articles.set(item.id,item));
+  const publishedIds=new Map([...submissionStatuses.values()].filter(item=>item.status==='published').map(item=>[item.articleId,item.publicId]));
+  const articles=new Map((remote.articles||[]).filter(item=>!publishedIds.has(item.id)).map(item=>[item.id,item]));customPassages.filter(item=>!publishedIds.has(item.id)).forEach(item=>articles.set(item.id,item));
   const existingIds=new Set(customPassages.map(item=>item.id));
   for(const article of articles.values())if(!existingIds.has(article.id)){customPassages.push(article);passages.push(article)}
-  for(const [id,value] of Object.entries(remote.progress||{})){const local=progress[id];if(!local||String(value.date||'')>String(local.date||''))progress[id]=value}
+  for(const [id,value] of Object.entries(remote.progress||{})){const targetId=publishedIds.get(id)||id,local=progress[targetId];if(!local||String(value.date||'')>String(local.date||''))progress[targetId]=value;if(targetId!==id)delete progress[id]}
   localStorage.setItem('customReadingPassages',JSON.stringify(customPassages));localStorage.setItem('readingProgress',JSON.stringify(progress));
   $('#totalCount').textContent=passages.length;$('#doneCount').textContent=Object.keys(progress).length;selectPassage(current.id);renderVocabularyBook();
 }
 async function syncCloudData(){
   if(!cloudUser)return;
+  if(cloudSyncPromise)return cloudSyncPromise;
   setSyncStatus('正在同步…');
-  try{const remote=await apiRequest('/api/sync');mergeCloudState(remote.state);await apiRequest('/api/sync',{method:'PUT',body:JSON.stringify(cloudState())});setSyncStatus(`已同步 · ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`);await loadSubmissionStatuses();renderCloudArticles()}
+  cloudSyncPromise=(async()=>{try{await loadSubmissionStatuses(false);removePublishedPrivateCopies();const remote=await apiRequest('/api/sync');mergeCloudState(remote.state);await apiRequest('/api/sync',{method:'PUT',body:JSON.stringify(cloudState())});await loadSubmissionStatuses(false);removePublishedPrivateCopies();await loadPublicLibrary();setSyncStatus(`已自动同步 · ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`);renderCloudArticles();renderList()}
   catch(error){setSyncStatus(`同步失败：${error.message}`,true)}
+  finally{cloudSyncPromise=null}})();
+  return cloudSyncPromise;
 }
 function scheduleCloudSync(){if(!cloudUser)return;clearTimeout(cloudSyncTimer);cloudSyncTimer=setTimeout(syncCloudData,700)}
-async function loadSubmissionStatuses(){
-  if(!cloudUser)return;try{const data=await apiRequest('/api/submissions');submissionStatuses.clear();data.submissions.forEach(item=>submissionStatuses.set(item.articleId,item));renderList()}catch{}
+function startAutomaticSync(){clearInterval(cloudSyncInterval);if(cloudUser)cloudSyncInterval=setInterval(()=>{if(!document.hidden&&navigator.onLine!==false)syncCloudData()},60000)}
+function stopAutomaticSync(){clearTimeout(cloudSyncTimer);clearInterval(cloudSyncInterval);cloudSyncTimer=null;cloudSyncInterval=null}
+function removePublishedPrivateCopies(){
+  const published=[...submissionStatuses.values()].filter(item=>item.status==='published');if(!published.length)return;
+  let changed=false;
+  published.forEach(info=>{const articleId=info.articleId,index=customPassages.findIndex(item=>item.id===articleId);if(index<0)return;customPassages.splice(index,1);const passageIndex=passages.findIndex(item=>item.id===articleId);if(passageIndex>=0)passages.splice(passageIndex,1);if(info.publicId&&progress[articleId]){const existing=progress[info.publicId];if(!existing||String(progress[articleId].date||'')>String(existing.date||''))progress[info.publicId]=progress[articleId]}delete progress[articleId];changed=true});
+  if(!changed)return false;localStorage.setItem('customReadingPassages',JSON.stringify(customPassages));localStorage.setItem('readingProgress',JSON.stringify(progress));$('#totalCount').textContent=passages.length;$('#doneCount').textContent=Object.keys(progress).length;if(!passages.includes(current))current=passages[0];renderVocabularyBook();return true
+}
+async function loadSubmissionStatuses(render=true){
+  if(!cloudUser)return;try{const data=await apiRequest('/api/submissions');submissionStatuses.clear();data.submissions.forEach(item=>submissionStatuses.set(item.articleId,item));if(render)renderList()}catch{}
 }
 function statusLabel(status){return{submitted:'审核中',published:'已发布',rejected:'重新提交'}[status]||'提交精选'}
 async function submitArticle(articleId,button){
   if(!cloudUser){toast('请先登录，再提交文章');openAccountModal();return}
-  if(!confirm('请确认文章不含个人敏感信息，并且你有权将其投稿到“社区拾光”。是否继续？'))return;
+  if(!confirm('请确认文章不含个人敏感信息，并且你有权将其投稿到“社区精选”。是否继续？'))return;
   button.disabled=true;button.textContent='正在提交…';
   try{await syncCloudData();await apiRequest('/api/submissions',{method:'POST',body:JSON.stringify({articleId})});await loadSubmissionStatuses();toast('文章已提交管理员审核')}
   catch(error){button.disabled=false;button.textContent='重试提交';toast(error.message)}
@@ -388,14 +410,14 @@ function openAccountModal(){closeLearningCard();$('#accountModal').hidden=false;
 function closeAccountModal(){$('#accountModal').hidden=true}
 async function authenticate(mode){
   const username=$('#authUsername').value.trim(),password=$('#authPassword').value,error=$('#authError');error.textContent='';
-  try{const data=await apiRequest(`/api/auth/${mode}`,{method:'POST',body:JSON.stringify({username,password})});cloudUser=data.user;$('#authPassword').value='';renderAccount();await syncCloudData();toast(mode==='register'?'账号创建成功':'登录成功')}
+  try{const data=await apiRequest(`/api/auth/${mode}`,{method:'POST',body:JSON.stringify({username,password})});cloudUser=data.user;startAutomaticSync();$('#authPassword').value='';renderAccount();await syncCloudData();toast(mode==='register'?'账号创建成功':'登录成功')}
   catch(problem){error.textContent=problem.message}
 }
 async function logout(){
-  try{await apiRequest('/api/auth/logout',{method:'POST'});}catch{}cloudUser=null;submissionStatuses.clear();renderAccount();renderList();closeAccountModal();toast('已退出登录；本机缓存仍保留在此设备')
+  try{await apiRequest('/api/auth/logout',{method:'POST'});}catch{}stopAutomaticSync();cloudUser=null;submissionStatuses.clear();renderAccount();renderList();closeAccountModal();toast('已退出登录；本机缓存仍保留在此设备')
 }
 async function restoreSession(){
-  try{const data=await apiRequest('/api/auth/me');cloudUser=data.user;renderAccount();if(cloudUser)await syncCloudData()}catch{cloudUser=null;renderAccount()}
+  try{const data=await apiRequest('/api/auth/me');cloudUser=data.user;renderAccount();if(cloudUser){startAutomaticSync();await syncCloudData()}}catch{cloudUser=null;stopAutomaticSync();renderAccount()}
 }
 async function loadPublicLibrary(){
   try{
@@ -414,8 +436,8 @@ async function openAdmin(){
 }
 function renderAdminSubmissions(items){
   const box=$('#adminSubmissionList');if(!items.length){box.innerHTML='<p class="account-intro">目前没有用户投稿。</p>';return}
-  box.innerHTML=items.map(item=>`<article class="submission-item" data-key="${escapeHtml(item.key)}"><div class="submission-meta"><span>投稿人：${escapeHtml(item.ownerName)}</span><span class="status-${escapeHtml(item.status)}">${statusLabel(item.status)}</span></div><h3>${escapeHtml(item.article.title)}</h3><p class="submission-text">${escapeHtml(item.article.text)}</p>${item.article.questions?.length?`<div class="submission-questions"><b>回答问题与参考答案</b><ol>${item.article.questions.map((question,index)=>`<li>${escapeHtml(question)}<small>${escapeHtml(item.article.answers?.[index]||'未填写参考答案')}</small></li>`).join('')}</ol></div>`:''}<textarea class="submission-note" placeholder="审核意见（退回时建议填写）">${escapeHtml(item.reviewNote||'')}</textarea><div class="submission-actions"><button data-action="reject">退回</button>${item.status==='published'?'<button data-action="unpublish">下架</button>':''}<button class="publish-btn" data-action="publish">发布到公共题库</button></div></article>`).join('');
-  box.querySelectorAll('[data-action]').forEach(button=>button.onclick=async()=>{const item=button.closest('.submission-item');button.disabled=true;try{await apiRequest('/api/admin/submissions',{method:'PATCH',body:JSON.stringify({key:item.dataset.key,action:button.dataset.action,reviewNote:item.querySelector('.submission-note').value})});toast('审核状态已更新');openAdmin();loadPublicLibrary()}catch(error){button.disabled=false;toast(error.message)}})
+  box.innerHTML=items.map(item=>`<article class="submission-item" data-key="${escapeHtml(item.key)}"><div class="submission-meta"><span>投稿人：${escapeHtml(item.ownerName)}</span><span class="status-${escapeHtml(item.status)}">${statusLabel(item.status)}</span></div><h3>${escapeHtml(item.article.title)}</h3><p class="submission-text">${escapeHtml(item.article.text)}</p>${item.article.questions?.length?`<div class="submission-questions"><b>回答问题与参考答案</b><ol>${item.article.questions.map((question,index)=>`<li>${escapeHtml(question)}<small>${escapeHtml(item.article.answers?.[index]||'未填写参考答案')}</small></li>`).join('')}</ol></div>`:''}<textarea class="submission-note" placeholder="审核意见（退回时建议填写）">${escapeHtml(item.reviewNote||'')}</textarea><div class="submission-actions"><button data-action="reject">退回</button>${item.status==='published'?'<button data-action="unpublish">下架</button>':''}<button class="publish-btn" data-action="publish">并入社区精选</button></div></article>`).join('');
+  box.querySelectorAll('[data-action]').forEach(button=>button.onclick=async()=>{const item=button.closest('.submission-item');button.disabled=true;try{await apiRequest('/api/admin/submissions',{method:'PATCH',body:JSON.stringify({key:item.dataset.key,action:button.dataset.action,reviewNote:item.querySelector('.submission-note').value})});toast('审核状态已更新');await syncCloudData();openAdmin()}catch(error){button.disabled=false;toast(error.message)}})
 }
 
 function normalizeWord(word){return word.toLowerCase().replace(/[’']/g,'').replace(/[^a-z0-9]/g,'')}
@@ -446,7 +468,7 @@ function renderAssessment(transcript,autoSave=true){
 }
 function startRecognition(){
   recognizedFinal='';recognizedInterim='';recognizedArchive='';recognitionSessionAvailable=false;$('#resultCard').hidden=false;$('#recognizedText').textContent='正在识别朗读内容……';$('#readingScore').textContent='…';['correctCount','wrongCount','omittedCount','extraCount'].forEach(id=>$(`#${id}`).textContent='—');
-  const sentences=splitSentences(current.text);$('#passageText').innerHTML=sentences.map((s,i)=>`<span class="sentence" data-index="${i}">${escapeHtml(s.trim())} </span>`).join('');
+  const sentences=splitSentences(current.text);$('#passageText').innerHTML=sentences.map((s,i)=>`<span class="sentence" data-index="${i}">${escapeHtml(s)}</span>`).join('');
   if(!RecognitionEngine){$('#recognizedText').textContent='当前浏览器不支持自动语音识别。录音仍会正常保存，但不能自动批改。';return false}
   try{recognition=new RecognitionEngine();recognition.lang='en-US';recognition.continuous=true;recognition.interimResults=true;recognition.maxAlternatives=1;
     recognition.onresult=e=>{let final='',interim='';for(let i=0;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)final+=t+' ';else interim+=t+' '}recognizedFinal=final.trim();recognizedInterim=interim.trim();$('#recognizedText').textContent=(recognizedFinal+' '+recognizedInterim).trim()||'正在聆听……'};
@@ -547,6 +569,7 @@ $('#passageList').addEventListener('click',event=>{const edit=event.target.close
 $('#passageText').addEventListener('click',e=>{const marked=e.target.closest('[data-mark-word]');if(marked&&wordMarkMode){toggleMarkedWord(marked);return}const word=e.target.closest('.word');if(word)showWordCard(word.textContent,word.getBoundingClientRect())});
 $('#passageText').addEventListener('keydown',e=>{if(!['Enter',' '].includes(e.key))return;const marked=e.target.closest('[data-mark-word]');if(marked&&wordMarkMode){e.preventDefault();toggleMarkedWord(marked);return}if(e.target.matches('.word')){e.preventDefault();showWordCard(e.target.textContent,e.target.getBoundingClientRect())}});
 document.addEventListener('click',event=>{const word=event.target.closest('[data-vocab-word]');if(word)speakWord(word.dataset.vocabWord)});
+window.addEventListener('online',()=>{if(cloudUser)syncCloudData()});window.addEventListener('focus',()=>{if(cloudUser)syncCloudData()});document.addEventListener('visibilitychange',()=>{if(cloudUser&&!document.hidden)syncCloudData()});
 $('#passageText').addEventListener('mouseup',handleTextSelection);$('#passageText').addEventListener('touchend',handleTextSelection);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeLearningCard();closeCustomModal();closeAccountModal();closeVocabularyBook();$('#adminModal').hidden=true}});
 document.addEventListener('pointerdown',e=>{const card=$('#learningCard');if(!card.hidden&&!card.contains(e.target)&&!e.target.closest?.('.word'))closeLearningCard()});

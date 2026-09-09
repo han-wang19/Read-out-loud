@@ -4,7 +4,7 @@ import { sanitizeState } from '../lib/data.mjs'
 
 export default async request => {
   try {
-    const user = await requireUser(request), store = getStore('reading-user-data')
+    const user = await requireUser(request), store = getStore('reading-user-data', { consistency: 'strong' })
     if (request.method === 'GET') return json({ state: (await store.get(user.id, { type: 'json' })) || { articles: [], progress: {} } })
     if (request.method === 'PUT') {
       checkOrigin(request)

@@ -1,5 +1,6 @@
 import { getStore } from '@netlify/blobs'
 import { checkOrigin, handleError, json, requireAdmin } from '../lib/auth.mjs'
+import { sanitizeState } from '../lib/data.mjs'
 
 export default async request => {
   try {
@@ -28,14 +29,32 @@ export default async request => {
       const legacyPublicId = `community-${item.article.id}`
       const publicId = item.publicId || `community-${item.ownerId}-${item.article.id.replace(/^custom-/, '')}`
       if (action === 'publish') {
-        const publicArticle = { ...item.article, id: publicId, type: '社区拾光', topic: item.article.topic || '社区投稿', source: '社区投稿 · 管理员审核', publishedAt: new Date().toISOString() }
+        const publicArticle = { ...item.article, id: publicId, type: '社区精选', topic: item.article.topic || '社区投稿', source: '社区投稿 · 管理员审核', publishedAt: new Date().toISOString() }
         await published.setJSON(publicId, publicArticle)
         if (legacyPublicId !== publicId) await published.delete(legacyPublicId)
+        const userData = getStore('reading-user-data', { consistency: 'strong' })
+        const ownerState = (await userData.get(item.ownerId, { type: 'json' })) || { articles: [], progress: {} }
+        ownerState.articles = (ownerState.articles || []).filter(article => article.id !== item.article.id)
+        if (ownerState.progress?.[item.article.id]) {
+          ownerState.progress[publicId] = ownerState.progress[item.article.id]
+          delete ownerState.progress[item.article.id]
+        }
+        await userData.setJSON(item.ownerId, sanitizeState(ownerState))
         item.publicId = publicId
         item.status = 'published'
       } else {
         await published.delete(publicId)
         if (legacyPublicId !== publicId) await published.delete(legacyPublicId)
+        if (item.status === 'published') {
+          const userData = getStore('reading-user-data', { consistency: 'strong' })
+          const ownerState = (await userData.get(item.ownerId, { type: 'json' })) || { articles: [], progress: {} }
+          if (!(ownerState.articles || []).some(article => article.id === item.article.id)) ownerState.articles = [...(ownerState.articles || []), item.article]
+          if (ownerState.progress?.[publicId]) {
+            ownerState.progress[item.article.id] = ownerState.progress[publicId]
+            delete ownerState.progress[publicId]
+          }
+          await userData.setJSON(item.ownerId, sanitizeState(ownerState))
+        }
         item.status = action === 'reject' ? 'rejected' : 'submitted'
       }
       item.reviewNote = reviewNote;item.reviewedBy = admin.id;item.updatedAt = new Date().toISOString()

@@ -60,10 +60,11 @@ body.practice-open .practice-shell{display:block;max-width:900px;margin:34px aut
 .article-vocabulary,.vocabulary-book-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
 .article-vocabulary>div,.vocabulary-book-grid section{padding:14px;border:1px solid var(--line);border-radius:9px;background:var(--paper)}
 .article-vocabulary h4,.vocabulary-book-grid h3{margin:0 0 10px;font-size:14px}
-.vocabulary-word-list{display:flex;flex-wrap:wrap;gap:7px}
+.vocabulary-word-list{display:flex;flex-direction:column}
 .vocabulary-word-list>p{margin:0;color:var(--muted);font-size:11px}
-.vocabulary-word-list button{border:1px solid var(--line);border-radius:18px;background:var(--card);color:var(--ink);padding:6px 9px;font-size:12px}
-.vocabulary-word-list button:hover{border-color:var(--orange);color:var(--orange)}.vocabulary-word-list button span{margin-left:4px;font-size:9px}
+.vocabulary-row{display:grid;grid-template-columns:minmax(92px,.7fr) minmax(0,1.3fr);gap:14px;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--line)}
+.vocabulary-row:last-child{border-bottom:0}.vocabulary-row button{border:0;background:transparent;color:var(--green);padding:0;text-align:left;font:600 15px/1.45 Georgia,serif;text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--green) 40%,transparent);text-underline-offset:3px}
+.vocabulary-row button:hover,.vocabulary-row button:focus{color:var(--orange);outline:none}.vocabulary-row>span{color:var(--muted);font-size:12px;line-height:1.55;overflow-wrap:anywhere}
 .vocab-select-word{border-radius:4px;cursor:pointer;outline:none}.vocab-select-word:hover{background:var(--mint)}.vocab-select-word.selected{background:#ffd09d;box-shadow:0 0 0 2px var(--orange)}
 .vocabulary-book-modal{width:min(760px,100%)}
 .passage-text{white-space:pre-wrap}
