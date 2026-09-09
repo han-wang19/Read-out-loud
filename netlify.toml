@@ -1,0 +1,15 @@
+[build]
+  command = "node -e \"require('node:fs').accessSync('reading-practice/index.html')\""
+  publish = "reading-practice"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(self), microphone=(self)"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://api.mymemory.translated.net https://translate.googleapis.com; worker-src 'self' blob:; child-src 'self' blob:"

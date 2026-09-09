@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="北京高考英语听说机考短文朗读专项练习">
+  <title>京声朗读｜北京高考英语听说练习</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="assessment.css?v=6">
+  <link rel="stylesheet" href="practice-enhancements.css?v=6">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#"><span class="brand-mark">声</span><span>京声朗读</span></a>
+    <nav><a href="#library">开始练习</a><a href="#library">题库</a><a href="#about">资料说明</a></nav>
+    <div class="topbar-actions"><button id="accountBtn" class="account-btn">登录 / 同步</button><button id="themeBtn" class="icon-btn" aria-label="切换深色模式">☾</button></div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="eyebrow">BEIJING GAOKAO · READ ALOUD</div>
+      <h1>把每一次朗读，<br><em>练成考场的从容。</em></h1>
+      <p>按照北京高考英语听说机考节奏设计：60 秒准备，90 秒朗读。题材来自历年考试回忆主题与仿真模拟题。</p>
+      <div class="hero-actions"><a class="primary-btn" href="#library">开始今日练习 <span>→</span></a><button id="randomBtn" class="ghost-btn">随机一篇</button></div>
+      <div class="stats"><div><b id="totalCount">8</b><span>篇练习</span></div><div><b>90s</b><span>仿真朗读</span></div><div><b id="doneCount">0</b><span>已完成</span></div></div>
+    </section>
+
+    <section id="practice" class="practice-shell">
+      <aside class="sidebar" id="library">
+        <div class="side-heading"><div><span class="eyebrow">PRACTICE LIBRARY</span><h2>朗读题库</h2></div><button id="collapseBtn" class="icon-btn">‹</button></div>
+        <label class="search"><span>⌕</span><input id="searchInput" placeholder="搜索主题或关键词"></label>
+        <div class="filters"><button class="chip active" data-filter="all">全部</button><button class="chip" data-filter="真题主题仿写">真题主题仿写</button><button class="chip" data-filter="原创模拟">原创模拟</button></div>
+        <button id="customBtn" class="custom-passage-btn"><span>＋</span> 添加自己的文章</button>
+        <div id="passageList" class="passage-list"></div>
+      </aside>
+
+      <article class="reader">
+        <button id="backToLibraryBtn" class="back-library-btn">← 返回题库</button>
+        <div class="reader-head">
+          <div><div id="sourceBadge" class="source-badge">真题主题仿写</div><h2 id="passageTitle">Social Battery</h2><p id="passageMeta">2026 · 社会交往 · 中等</p></div>
+          <button id="favoriteBtn" class="icon-btn heart" aria-label="收藏">♡</button>
+        </div>
+
+        <div class="exam-strip">
+          <div class="phase"><span id="phaseDot"></span><div><small>当前阶段</small><b id="phaseLabel">自由练习</b></div></div>
+          <div class="timer" id="timer">01:30</div>
+          <div class="exam-actions"><button id="prepBtn">60秒准备</button><button id="examBtn" class="dark-btn">90秒朗读</button></div>
+        </div>
+
+        <div class="tool-row">
+          <div class="audio-controls"><button id="speakBtn" class="round-btn" aria-label="播放示范">▶</button><button id="stopSpeakBtn" class="mini-btn">停止</button><span class="divider"></span><label>语速 <input id="rateRange" type="range" min="0.65" max="1.2" step="0.05" value="0.85"><b id="rateLabel">0.85×</b></label></div>
+          <div class="display-controls"><button id="smallerBtn" class="mini-btn">A−</button><button id="largerBtn" class="mini-btn">A＋</button><button id="focusBtn" class="mini-btn">专注模式</button></div>
+        </div>
+
+        <section class="text-card">
+          <div id="passageText" class="passage-text" tabindex="0"></div>
+          <p class="lookup-hint">评分后点击彩色单词可查看词卡；拖选一句英文可查看翻译、结构与断句建议。</p>
+          <div class="word-count"><span id="wordCount">0</span> words <span>·</span> 建议朗读 70–90 秒</div>
+        </section>
+
+        <section class="record-card">
+          <div class="record-main">
+            <button id="recordBtn" class="record-btn"><span></span></button>
+            <div><b id="recordLabel">点击开始录音（自动识别和评分）</b><p>录音保存在当前浏览器；语音识别可能调用设备或浏览器服务</p></div>
+            <div id="recordTime" class="record-time">00:00</div>
+          </div>
+          <audio id="audioPlayback" controls hidden></audio>
+        </section>
+
+        <section id="resultCard" class="result-card" hidden>
+          <div class="result-head">
+            <div><span class="eyebrow">READING REPORT</span><h3>朗读识别报告</h3></div>
+            <div class="score-ring"><b id="readingScore">--</b><span>分</span></div>
+          </div>
+          <div class="result-metrics">
+            <div><b id="correctCount">0</b><span>读对</span></div>
+            <div><b id="wrongCount">0</b><span>疑似读错</span></div>
+            <div><b id="omittedCount">0</b><span>漏读</span></div>
+            <div><b id="extraCount">0</b><span>多读</span></div>
+          </div>
+          <div class="legend"><span><i class="correct-dot"></i>绿色：读对</span><span><i class="wrong-dot"></i>红色：疑似读错</span><span><i class="omitted-dot"></i>黑色下划线：漏读</span></div>
+          <div class="transcript-box"><small>语音识别文本</small><p id="recognizedText">正在等待识别结果……</p></div>
+          <p class="result-note">自动结果受设备、网络、口音和环境噪声影响，仅供练习参考，不等同于官方评分。</p>
+        </section>
+
+        <section class="questions-card">
+          <button id="questionsToggle" class="questions-title"><span>回答问题 · 3 题 / 6 分</span><span>＋</span></button>
+          <div id="questions" class="questions" hidden></div>
+          <div id="questionPracticePanel" class="question-practice" hidden>
+            <div class="question-progress"><span id="questionProgress">第 1 / 3 题</span><b id="questionTotalScore">0 / 6 分</b></div>
+            <h3 id="activeQuestion"></h3>
+            <div class="question-answer-bar"><span>本题作答时间</span><b id="questionTimer">00:40</b></div>
+            <button id="playQuestionBtn" class="ghost-btn question-secondary-btn">▶ 播放问题</button>
+            <button id="answerRecordBtn" class="primary-btn question-record-btn">开始回答</button>
+            <p id="answerLiveText" class="answer-live-text">点击“开始回答”后，将启动麦克风和语音识别。</p>
+            <audio id="answerPlayback" controls hidden></audio>
+            <div id="answerFeedback" class="answer-feedback" hidden></div>
+            <button id="nextQuestionBtn" class="ghost-btn question-next-btn" hidden>下一题 →</button>
+          </div>
+        </section>
+
+        <section class="self-check">
+          <div class="section-title"><div><span class="eyebrow">QUICK REVIEW</span><h3>本次自评</h3></div><span id="scoreText">0 / 4</span></div>
+          <div class="checks"><label><input type="checkbox"> 发音清晰</label><label><input type="checkbox"> 停顿自然</label><label><input type="checkbox"> 重音准确</label><label><input type="checkbox"> 时间内完成</label></div>
+          <textarea id="notes" placeholder="记下易错词、连读或停顿问题……"></textarea>
+          <button id="saveBtn" class="primary-btn save-btn">保存本次练习</button>
+        </section>
+      </article>
+    </section>
+
+    <section id="about" class="about">
+      <div><span class="eyebrow">ABOUT THE MATERIALS</span><h2>资料来源说明</h2></div>
+      <p>北京市高考英语听说考试不公开完整真题与标准答案。本站“真题主题仿写”依据公开考生回忆中出现的主题重新编写，不是官方原文；“原创模拟”按短文朗读题型、篇幅与难度设计。官方体验系统可在北京教育考试院网站下载安装。</p>
+      <div class="source-links"><a href="https://www.bjeea.cn/html/gkgz/xglj/2020/1209/77134.html" target="_blank" rel="noreferrer">北京教育考试院体验系统 ↗</a><a href="https://www.beijing.gov.cn/fuwu/bmfw/sy/jrts/tzxx/202511/t20251121_4291520.html" target="_blank" rel="noreferrer">2026考生须知 ↗</a><a href="https://www.gaokzx.com/gk/gaokao/150873.html" target="_blank" rel="noreferrer">2026回忆主题来源 ↗</a><a href="privacy.html">隐私与数据说明 →</a></div>
+    </section>
+  </main>
+
+  <aside id="learningCard" class="learning-card" role="dialog" aria-modal="false" aria-live="polite" hidden>
+    <button id="learningCardClose" class="learning-card-close" aria-label="关闭卡片">×</button>
+    <div id="learningCardContent"></div>
+  </aside>
+
+  <div id="customModal" class="modal-backdrop" hidden>
+    <section class="custom-modal" role="dialog" aria-modal="true" aria-labelledby="customModalTitle">
+      <button id="customModalClose" class="learning-card-close" aria-label="关闭">×</button>
+      <span class="eyebrow">CREATE YOUR PRACTICE</span>
+      <h2 id="customModalTitle">添加自己的朗读文章</h2>
+      <label class="form-field"><span>文章标题（可选）</span><input id="customTitle" maxlength="80" placeholder="例如：My Reading Practice"></label>
+      <label class="form-field"><span>粘贴或输入英文文章</span><textarea id="customText" maxlength="12000" placeholder="Paste or type an English passage here..."></textarea></label>
+      <fieldset class="custom-question-fields">
+        <legend>回答问题（可选；如填写，请完整填写 3 组）</legend>
+        <p>参考答案用于浏览器自动匹配答题要点，练习者作答后才会看到。</p>
+        <label class="form-field"><span>问题 1</span><input id="customQuestion1" maxlength="200" placeholder="例如：What is the passage mainly about?"></label>
+        <label class="form-field"><span>参考答案 1</span><input id="customAnswer1" maxlength="500" placeholder="填写包含主要得分点的英文答案"></label>
+        <label class="form-field"><span>问题 2</span><input id="customQuestion2" maxlength="200"></label>
+        <label class="form-field"><span>参考答案 2</span><input id="customAnswer2" maxlength="500"></label>
+        <label class="form-field"><span>问题 3</span><input id="customQuestion3" maxlength="200"></label>
+        <label class="form-field"><span>参考答案 3</span><input id="customAnswer3" maxlength="500"></label>
+      </fieldset>
+      <div class="photo-import">
+        <div><b>从照片识别英文</b><p>可选择相册图片；手机上也可以直接拍照。清晰、端正的印刷体效果最好。</p></div>
+        <label class="photo-btn">拍照或上传<input id="photoInput" type="file" accept="image/*" capture="environment"></label>
+      </div>
+      <img id="photoPreview" class="photo-preview" alt="待识别的文章照片" hidden>
+      <div id="ocrStatus" class="ocr-status" role="status" hidden><span></span><p>准备识别…</p></div>
+      <p id="customError" class="form-error" role="alert"></p>
+      <div class="modal-actions"><button id="customCancel" class="ghost-btn">取消</button><button id="createPracticeBtn" class="primary-btn">生成朗读练习</button></div>
+    </section>
+  </div>
+
+  <div id="accountModal" class="modal-backdrop" hidden>
+    <section class="custom-modal account-modal" role="dialog" aria-modal="true" aria-labelledby="accountModalTitle">
+      <button id="accountModalClose" class="learning-card-close" aria-label="关闭">×</button>
+      <span class="eyebrow">ACCOUNT &amp; SYNC</span>
+      <h2 id="accountModalTitle">账号与云端同步</h2>
+      <div id="signedOutView">
+        <p class="account-intro">使用用户名和密码登录，不需要邮箱或手机号。登录后可在不同设备查看自己的文章和练习记录。</p>
+        <label class="form-field"><span>用户名</span><input id="authUsername" autocomplete="username" maxlength="24" placeholder="3–24 位字母或数字"></label>
+        <label class="form-field"><span>密码</span><input id="authPassword" type="password" autocomplete="current-password" maxlength="128" placeholder="至少 10 个字符"></label>
+        <p class="privacy-note">目前不收集手机号、邮箱、原始照片或录音。由于没有联系方式，忘记密码后暂时无法自行找回。</p>
+        <p id="authError" class="form-error" role="alert"></p>
+        <div class="modal-actions auth-actions"><button id="registerBtn" class="ghost-btn">注册新账号</button><button id="loginBtn" class="primary-btn">登录</button></div>
+      </div>
+      <div id="signedInView" hidden>
+        <div class="account-summary"><div class="account-avatar">✓</div><div><b id="accountName"></b><p>用户 ID：<code id="accountId"></code></p><p>当前权限：<strong id="accountRole">普通用户</strong></p></div></div>
+        <div id="syncStatus" class="sync-status">正在检查云端数据…</div>
+        <p id="adminSetupHint" class="admin-setup-hint" hidden></p>
+        <div class="account-section"><div class="account-section-head"><h3>我的文章</h3><span>私人文章只有你自己可见</span></div><div id="cloudArticleList" class="cloud-article-list"></div></div>
+        <button id="openAdminBtn" class="ghost-btn admin-entry" hidden>进入投稿审核</button>
+        <div class="modal-actions"><button id="syncNowBtn" class="ghost-btn">立即同步</button><button id="logoutBtn" class="danger-btn">退出登录</button></div>
+      </div>
+    </section>
+  </div>
+
+  <div id="adminModal" class="modal-backdrop" hidden>
+    <section class="custom-modal admin-modal" role="dialog" aria-modal="true" aria-labelledby="adminModalTitle">
+      <button id="adminModalClose" class="learning-card-close" aria-label="关闭">×</button>
+      <span class="eyebrow">ADMIN REVIEW</span>
+      <h2 id="adminModalTitle">用户投稿审核</h2>
+      <p class="account-intro">这里只显示用户主动投稿的文章，不显示其私人文章和练习记录。</p>
+      <div id="adminSubmissionList" class="submission-list"><p class="card-loading">正在加载投稿…</p></div>
+    </section>
+  </div>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script src="vendor/tesseract/tesseract.min.js"></script>
+  <script src="local-dictionary.js"></script>
+  <script src="local-translations.js"></script>
+  <script src="app.js?v=6"></script>
+</body>
+</html>
