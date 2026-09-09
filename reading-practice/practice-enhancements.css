@@ -69,6 +69,7 @@ body.practice-open .practice-shell{display:block;max-width:900px;margin:34px aut
 .vocabulary-book-modal{width:min(760px,100%)}
 .passage-text{white-space:pre-wrap}
 .submission-text{white-space:pre-wrap}
+.photo-preview-wrap{position:relative;margin:12px 0}.photo-preview-wrap[hidden]{display:none}.photo-preview-wrap .photo-preview{margin:0 auto}.remove-photo-btn{display:block;margin:8px auto 0;border:0;background:transparent;color:#b7463e;padding:4px 8px;font-size:12px;text-decoration:underline;text-underline-offset:3px}.remove-photo-btn:hover,.remove-photo-btn:focus{color:#8f2f29;outline:none}
 @media(max-width:560px){.article-vocabulary,.vocabulary-book-grid{grid-template-columns:1fr}.vocabulary-actions button{flex:1}.topbar-actions{gap:5px}.topbar-actions .account-btn{padding:7px 8px}}
 body:not(.practice-open) .my-passage-card .passage-item{border:0}
 @media(max-width:900px){body:not(.practice-open) .passage-card{min-width:0}}

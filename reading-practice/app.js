@@ -186,6 +186,7 @@ async function fetchJson(url){
   finally{clearTimeout(timeout)}
 }
 function withTimeout(promise,ms){return new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('timeout')),ms);Promise.resolve(promise).then(value=>{clearTimeout(timer);resolve(value)},error=>{clearTimeout(timer);reject(error)})})}
+function withOcrTimeout(promise,ms,stage){return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{const error=new Error(`${stage}超时`);error.code=`OCR_${stage.toUpperCase()}_TIMEOUT`;reject(error)},ms);Promise.resolve(promise).then(value=>{clearTimeout(timer);resolve(value)},error=>{clearTimeout(timer);reject(error)})})}
 let browserTranslatorPromise;
 async function translateInBrowser(text){
   if(!('Translator' in self))throw new Error('Browser translator unavailable');
@@ -268,7 +269,7 @@ function handleTextSelection(){
   },0);
 }
 
-function resetCustomForm(){editingPassageId=null;$('#customTitle').value='';$('#customText').value='';[1,2,3].forEach(i=>{$(`#customQuestion${i}`).value='';$(`#customAnswer${i}`).value=''});$('#photoInput').value='';$('#photoPreview').hidden=true;$('#ocrStatus').hidden=true;$('#customModalTitle').textContent='添加自己的朗读文章';$('#createPracticeBtn').textContent='保存文章'}
+function resetCustomForm(){editingPassageId=null;$('#customTitle').value='';$('#customText').value='';[1,2,3].forEach(i=>{$(`#customQuestion${i}`).value='';$(`#customAnswer${i}`).value=''});clearPhotoSelection($('#ocrStatus').dataset.running==='true');$('#customModalTitle').textContent='添加自己的朗读文章';$('#createPracticeBtn').textContent='保存文章'}
 function openCustomModal(article=null){
   resetCustomForm();
   if(article){editingPassageId=article.id;$('#customModalTitle').textContent='修改我的文章与问答';$('#createPracticeBtn').textContent='保存修改';$('#customTitle').value=article.title||'';$('#customText').value=article.text||'';[1,2,3].forEach((i,index)=>{$(`#customQuestion${i}`).value=article.questions?.[index]||'';$(`#customAnswer${i}`).value=article.answers?.[index]||''})}
@@ -287,13 +288,19 @@ async function disposeOcrWorker(){
   const worker=ocrWorker;ocrWorkerGeneration++;ocrWorker=null;ocrWorkerPromise=null;
   if(worker)await withTimeout(worker.terminate(),5000).catch(()=>{});
 }
+function clearPhotoSelection(cancelRecognition=false){
+  if(cancelRecognition){ocrRunId++;disposeOcrWorker()}
+  const preview=$('#photoPreview'),input=$('#photoInput'),status=$('#ocrStatus');
+  if(preview.src?.startsWith('blob:'))URL.revokeObjectURL(preview.src);
+  preview.removeAttribute('src');$('#photoPreviewWrap').hidden=true;input.value='';input.disabled=false;$('#createPracticeBtn').disabled=false;status.hidden=true;status.dataset.running='false';
+}
 function getOcrWorker(base,onProgress){
   ocrProgressReporter=onProgress;
   if(ocrWorker)return Promise.resolve(ocrWorker);
   if(!ocrWorkerPromise){
     const generation=ocrWorkerGeneration;
     const pending=Tesseract.createWorker('eng',1,{workerPath:new URL('vendor/tesseract/worker.min.js',base).href,corePath:new URL('vendor/tesseract/core/',base).href,langPath:new URL('vendor/tesseract/lang',base).href,workerBlobURL:false,errorHandler:error=>ocrProgressReporter({error}),logger:message=>ocrProgressReporter(message)})
-      .then(async worker=>{if(generation!==ocrWorkerGeneration){await worker.terminate();throw new Error('OCR 初始化已取消')}ocrWorker=worker;return worker})
+      .then(async worker=>{if(generation!==ocrWorkerGeneration){await worker.terminate();throw new Error('OCR 初始化已取消')}await worker.setParameters({tessedit_pageseg_mode:Tesseract.PSM.SINGLE_BLOCK,preserve_interword_spaces:'1'});ocrWorker=worker;return worker})
       .catch(error=>{if(ocrWorkerPromise===pending)ocrWorkerPromise=null;throw error});
     ocrWorkerPromise=pending;
   }
@@ -304,18 +311,19 @@ async function recognizePhoto(file){
   if(file.size>20*1024*1024){$('#customError').textContent='照片不能超过 20 MB，请先压缩或裁剪后重试。';return}
   const runId=++ocrRunId;
   const preview=$('#photoPreview'),status=$('#ocrStatus'),bar=status.querySelector('span'),label=status.querySelector('p'),input=$('#photoInput');
-  input.disabled=true;
-  preview.src=URL.createObjectURL(file);preview.hidden=false;status.hidden=false;status.dataset.running='true';bar.style.width='2%';label.textContent='正在启动本地英文识别…';$('#customError').textContent='';
-  if(!window.Tesseract){label.textContent='OCR 组件未能加载。';status.dataset.running='false';input.disabled=false;return}
+  input.disabled=true;$('#createPracticeBtn').disabled=true;
+  if(preview.src?.startsWith('blob:'))URL.revokeObjectURL(preview.src);preview.src=URL.createObjectURL(file);$('#photoPreviewWrap').hidden=false;status.hidden=false;status.dataset.running='true';bar.style.width='2%';label.textContent='正在启动本地英文识别…';$('#customError').textContent='';
+  if(!window.Tesseract){label.textContent='OCR 组件未能加载。';status.dataset.running='false';input.disabled=false;input.value='';$('#createPracticeBtn').disabled=false;return}
   try{
-    const base=document.baseURI;label.textContent='正在优化照片尺寸…';const image=await withTimeout(prepareOcrImage(file),20000);
+    const base=document.baseURI;label.textContent='正在优化照片尺寸…';const image=await withOcrTimeout(prepareOcrImage(file),30000,'图片预处理');
+    if(runId!==ocrRunId)return;
     const report=message=>{if(runId!==ocrRunId)return;if(message.error){label.textContent=`OCR 引擎错误：${message.error?.message||message.error}`;return}const progress=Math.round((message.progress||0)*100);if(message.status==='recognizing text'){bar.style.width=`${Math.max(8,progress)}%`;label.textContent=`正在识别英文… ${progress}%`}else{bar.style.width=`${Math.max(3,Math.round(progress*.08))}%`;label.textContent='首次使用正在加载本地识别模型…'}};
-    const worker=await withTimeout(getOcrWorker(base,report),45000);const result=await withTimeout(worker.recognize(image),60000),text=cleanOcrText(result.data.text||'');
+    const worker=await withOcrTimeout(getOcrWorker(base,report),120000,'模型加载');if(runId!==ocrRunId)return;label.textContent='模型已就绪，正在识别英文…';bar.style.width='8%';const result=await withOcrTimeout(worker.recognize(image),120000,'文字识别'),text=cleanOcrText(result.data.text||'');
     if(runId!==ocrRunId)return;
     if(!text)throw new Error('没有识别到英文文字');
     $('#customText').value=text;bar.style.width='100%';label.textContent='识别完成，请检查文字后生成练习。';
-  }catch(error){await disposeOcrWorker();if(runId!==ocrRunId)return;bar.style.width='0';const reason=error?.message==='timeout'?'处理超时，请换用更清晰或尺寸更小的照片':error?.message||'请换一张更清晰的照片';label.textContent=`识别失败：${reason}${location.protocol==='file:'?'。请按 README 用 localhost 打开网页后重试。':''}`}
-  finally{if(runId===ocrRunId){status.dataset.running='false';input.disabled=false}}
+  }catch(error){await disposeOcrWorker();if(runId!==ocrRunId)return;bar.style.width='0';const reasons={OCR_模型加载_TIMEOUT:'本地 OCR 模型加载超时，请检查网络后重新选择这张图片',OCR_文字识别_TIMEOUT:'文字识别耗时过长，请裁掉截图中与文章无关的区域后重试',OCR_图片预处理_TIMEOUT:'浏览器处理图片超时，请重新选择图片或换用 Chrome / Edge'};const reason=reasons[error?.code]||error?.message||'请换一张更清晰的照片';label.textContent=`识别失败：${reason}${location.protocol==='file:'?'。请按 README 用 localhost 打开网页后重试。':''}`}
+  finally{if(runId===ocrRunId){status.dataset.running='false';input.disabled=false;input.value='';$('#createPracticeBtn').disabled=false}}
 }
 function createCustomPractice(){
   const raw=$('#customText').value.trim(),words=getWords(raw);$('#customError').textContent='';
@@ -564,6 +572,7 @@ $('#loginBtn').onclick=()=>authenticate('login');$('#registerBtn').onclick=()=>a
 $('#authPassword').addEventListener('keydown',e=>{if(e.key==='Enter')authenticate('login')});$('#openAdminBtn').onclick=openAdmin;$('#adminModalClose').onclick=()=>$('#adminModal').hidden=true;$('#adminModal').addEventListener('click',e=>{if(e.target===$('#adminModal'))$('#adminModal').hidden=true});
 $('#customBtn').onclick=()=>openCustomModal();$('#customModalClose').onclick=closeCustomModal;$('#customCancel').onclick=closeCustomModal;$('#createPracticeBtn').onclick=createCustomPractice;
 $('#photoInput').onchange=e=>recognizePhoto(e.target.files?.[0]);$('#customModal').addEventListener('click',e=>{if(e.target===$('#customModal'))closeCustomModal()});
+$('#removePhotoBtn').onclick=()=>clearPhotoSelection($('#ocrStatus').dataset.running==='true');
 window.addEventListener('pagehide',()=>{if(ocrWorker)ocrWorker.terminate().catch(()=>{})});
 $('#passageList').addEventListener('click',event=>{const edit=event.target.closest('[data-edit]'),remove=event.target.closest('[data-delete]'),submit=event.target.closest('[data-submit]');if(edit){editCustomArticle(edit.dataset.edit);return}if(remove){deleteCustomArticle(remove.dataset.delete);return}if(submit){submitArticle(submit.dataset.submit,submit);return}const card=event.target.closest('.passage-item');if(!card)return;event.preventDefault();openPassage(card.dataset.id)});
 $('#passageText').addEventListener('click',e=>{const marked=e.target.closest('[data-mark-word]');if(marked&&wordMarkMode){toggleMarkedWord(marked);return}const word=e.target.closest('.word');if(word)showWordCard(word.textContent,word.getBoundingClientRect())});

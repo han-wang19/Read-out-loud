@@ -8,9 +8,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=9">
-  <link rel="stylesheet" href="assessment.css?v=9">
-  <link rel="stylesheet" href="practice-enhancements.css?v=9">
+  <link rel="stylesheet" href="styles.css?v=10">
+  <link rel="stylesheet" href="assessment.css?v=10">
+  <link rel="stylesheet" href="practice-enhancements.css?v=10">
 </head>
 <body>
   <header class="topbar">
@@ -149,7 +149,7 @@
         <div><b>从照片识别英文</b><p>可选择相册图片；手机上也可以直接拍照。清晰、端正的印刷体效果最好。</p></div>
         <label class="photo-btn">拍照或上传<input id="photoInput" type="file" accept="image/*" capture="environment"></label>
       </div>
-      <img id="photoPreview" class="photo-preview" alt="待识别的文章照片" hidden>
+      <div id="photoPreviewWrap" class="photo-preview-wrap" hidden><img id="photoPreview" class="photo-preview" alt="待识别的文章照片"><button id="removePhotoBtn" type="button" class="remove-photo-btn">移除图片</button></div>
       <div id="ocrStatus" class="ocr-status" role="status" hidden><span></span><p>准备识别…</p></div>
       <p id="customError" class="form-error" role="alert"></p>
       <div class="modal-actions"><button id="customCancel" class="ghost-btn">取消</button><button id="createPracticeBtn" class="primary-btn">保存文章</button></div>
@@ -193,6 +193,6 @@
   <script src="vendor/tesseract/tesseract.min.js"></script>
   <script src="local-dictionary.js"></script>
   <script src="local-translations.js"></script>
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>
