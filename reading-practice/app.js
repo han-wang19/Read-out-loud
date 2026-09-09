@@ -309,8 +309,13 @@ function getOcrWorker(base,onProgress){
   if(ocrWorker)return Promise.resolve(ocrWorker);
   if(!ocrWorkerPromise){
     const generation=ocrWorkerGeneration;
-    const pending=Tesseract.createWorker('eng',1,{workerPath:new URL('vendor/tesseract/worker.min.js',base).href,corePath:new URL('vendor/tesseract/core/tesseract-core-lstm.wasm.js',base).href,langPath:new URL('vendor/tesseract/lang',base).href,errorHandler:error=>ocrProgressReporter({error}),logger:message=>ocrProgressReporter(message)})
-      .then(async worker=>{if(generation!==ocrWorkerGeneration){await worker.terminate();throw new Error('OCR 初始化已取消')}await worker.setParameters({tessedit_pageseg_mode:Tesseract.PSM.SINGLE_BLOCK,preserve_interword_spaces:'1'});ocrWorker=worker;return worker})
+    const createAttempt=workerBlobURL=>Tesseract.createWorker('eng',1,{workerPath:new URL('vendor/tesseract/worker.min.js',base).href,corePath:new URL('vendor/tesseract/core/tesseract-core-lstm.wasm.js',base).href,langPath:new URL('vendor/tesseract/lang',base).href,workerBlobURL,errorHandler:error=>ocrProgressReporter({error}),logger:message=>ocrProgressReporter(message)})
+      .then(async worker=>{if(generation!==ocrWorkerGeneration){await worker.terminate();throw new Error('OCR 初始化已取消')}await worker.setParameters({tessedit_pageseg_mode:Tesseract.PSM.SINGLE_BLOCK,preserve_interword_spaces:'1'});ocrWorker=worker;return worker});
+    const pending=withOcrTimeout(createAttempt(false),40000,'引擎初始化尝试').catch(async firstError=>{
+      if(generation!==ocrWorkerGeneration)throw firstError;
+      ocrProgressReporter({status:'retrying OCR engine'});
+      return withOcrTimeout(createAttempt(true),40000,'引擎初始化尝试');
+    })
       .catch(error=>{if(ocrWorkerPromise===pending)ocrWorkerPromise=null;throw error});
     ocrWorkerPromise=pending;
   }
@@ -327,12 +332,12 @@ async function recognizePhoto(file){
   try{
     const base=document.baseURI;label.textContent='正在检查本地 OCR 文件…';await ensureOcrAssets(base,(name,index,total)=>{if(runId===ocrRunId){bar.style.width=`${Math.round(index/total*12)}%`;label.textContent=`正在加载${name}（${index}/${total}）…`}});if(runId!==ocrRunId)return;label.textContent='正在优化照片尺寸…';const image=await withOcrTimeout(prepareOcrImage(file),30000,'图片预处理');
     if(runId!==ocrRunId)return;
-    const report=message=>{if(runId!==ocrRunId)return;if(message.error){label.textContent=`OCR 引擎错误：${message.error?.message||message.error}`;return}const progress=Math.round((message.progress||0)*100),stage={"loading tesseract core":'正在启动 OCR 核心…',"loading language traineddata":'正在载入英文模型…',"initializing tesseract":'正在初始化 OCR 引擎…',"initializing api":'正在完成 OCR 初始化…'}[message.status];if(message.status==='recognizing text'){bar.style.width=`${Math.max(15,progress)}%`;label.textContent=`正在识别英文… ${progress}%`}else{bar.style.width=`${Math.max(12,Math.round(progress*15))}%`;label.textContent=stage||`正在准备 OCR：${message.status||'请稍候'}…`}};
-    const worker=await withOcrTimeout(getOcrWorker(base,report),120000,'模型加载');if(runId!==ocrRunId)return;label.textContent='模型已就绪，正在识别英文…';bar.style.width='8%';const result=await withOcrTimeout(worker.recognize(image),120000,'文字识别'),text=cleanOcrText(result.data.text||'');
+    const report=message=>{if(runId!==ocrRunId)return;if(message.error){label.textContent=`OCR 引擎错误：${message.error?.message||message.error}`;return}const progress=Math.round((message.progress||0)*100),stage={"loading tesseract core":'正在启动 OCR 核心…',"loading language traineddata":'正在载入英文模型…',"initializing tesseract":'正在初始化 OCR 引擎…',"initializing api":'正在完成 OCR 初始化…',"retrying OCR engine":'正在切换 OCR 加载方式，请稍候…'}[message.status];if(message.status==='recognizing text'){bar.style.width=`${Math.max(15,progress)}%`;label.textContent=`正在识别英文… ${progress}%`}else{bar.style.width=`${Math.max(12,Math.round(progress*15))}%`;label.textContent=stage||`正在准备 OCR：${message.status||'请稍候'}…`}};
+    const worker=await withOcrTimeout(getOcrWorker(base,report),90000,'引擎初始化');if(runId!==ocrRunId)return;label.textContent='模型已就绪，正在识别英文…';bar.style.width='8%';const result=await withOcrTimeout(worker.recognize(image),120000,'文字识别'),text=cleanOcrText(result.data.text||'');
     if(runId!==ocrRunId)return;
     if(!text)throw new Error('没有识别到英文文字');
     $('#customText').value=text;bar.style.width='100%';label.textContent='识别完成，请检查文字后生成练习。';
-  }catch(error){await disposeOcrWorker();if(runId!==ocrRunId)return;bar.style.width='0';const reasons={OCR_模型加载_TIMEOUT:'本地 OCR 模型加载超时，请检查网络后重新选择这张图片',OCR_文字识别_TIMEOUT:'文字识别耗时过长，请裁掉截图中与文章无关的区域后重试',OCR_图片预处理_TIMEOUT:'浏览器处理图片超时，请重新选择图片或换用 Chrome / Edge'};const reason=reasons[error?.code]||error?.message||'请换一张更清晰的照片';label.textContent=`识别失败：${reason}${location.protocol==='file:'?'。请按 README 用 localhost 打开网页后重试。':''}`}
+  }catch(error){await disposeOcrWorker();if(runId!==ocrRunId)return;bar.style.width='0';const reasons={OCR_引擎初始化_TIMEOUT:'本地 OCR 引擎初始化超时，请刷新页面后重试；若仍失败，请确认使用 HTTPS 或 localhost 打开',OCR_引擎初始化尝试_TIMEOUT:'本地 OCR 引擎初始化超时，请刷新页面后重试；若仍失败，请确认使用 HTTPS 或 localhost 打开',OCR_文字识别_TIMEOUT:'文字识别耗时过长，请裁掉截图中与文章无关的区域后重试',OCR_图片预处理_TIMEOUT:'浏览器处理图片超时，请重新选择图片或换用 Chrome / Edge'};const reason=reasons[error?.code]||error?.message||'请换一张更清晰的照片';label.textContent=`识别失败：${reason}${location.protocol==='file:'?'。请按 README 用 localhost 打开网页后重试。':''}`}
   finally{if(runId===ocrRunId){status.dataset.running='false';input.disabled=false;input.value='';$('#createPracticeBtn').disabled=false}}
 }
 function createCustomPractice(){
