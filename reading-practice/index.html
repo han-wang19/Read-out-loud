@@ -8,15 +8,14 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=6">
-  <link rel="stylesheet" href="assessment.css?v=6">
-  <link rel="stylesheet" href="practice-enhancements.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="assessment.css?v=8">
+  <link rel="stylesheet" href="practice-enhancements.css?v=8">
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="#"><span class="brand-mark">声</span><span>京声朗读</span></a>
-    <nav><a href="#library">开始练习</a><a href="#library">题库</a><a href="#about">资料说明</a></nav>
-    <div class="topbar-actions"><button id="accountBtn" class="account-btn">登录 / 同步</button><button id="themeBtn" class="icon-btn" aria-label="切换深色模式">☾</button></div>
+    <div class="topbar-actions"><button id="vocabBookBtn" class="account-btn">生词本</button><button id="accountBtn" class="account-btn">登录 / 同步</button><button id="themeBtn" class="icon-btn" aria-label="切换深色模式">☾</button></div>
   </header>
 
   <main>
@@ -24,7 +23,7 @@
       <div class="eyebrow">BEIJING GAOKAO · READ ALOUD</div>
       <h1>把每一次朗读，<br><em>练成考场的从容。</em></h1>
       <p>按照北京高考英语听说机考节奏设计：60 秒准备，90 秒朗读。题材来自历年考试回忆主题与仿真模拟题。</p>
-      <div class="hero-actions"><a class="primary-btn" href="#library">开始今日练习 <span>→</span></a><button id="randomBtn" class="ghost-btn">随机一篇</button></div>
+      <div class="hero-actions"><a class="primary-btn" href="#library">开始今日练习 <span>→</span></a></div>
       <div class="stats"><div><b id="totalCount">8</b><span>篇练习</span></div><div><b>90s</b><span>仿真朗读</span></div><div><b id="doneCount">0</b><span>已完成</span></div></div>
     </section>
 
@@ -32,7 +31,7 @@
       <aside class="sidebar" id="library">
         <div class="side-heading"><div><span class="eyebrow">PRACTICE LIBRARY</span><h2>朗读题库</h2></div><button id="collapseBtn" class="icon-btn">‹</button></div>
         <label class="search"><span>⌕</span><input id="searchInput" placeholder="搜索主题或关键词"></label>
-        <div class="filters"><button class="chip active" data-filter="all">全部</button><button class="chip" data-filter="真题主题仿写">真题主题仿写</button><button class="chip" data-filter="原创模拟">原创模拟</button></div>
+        <div class="filters"><button class="chip active" data-filter="all">全部</button><button class="chip" data-filter="真题主题仿写">真题主题仿写</button><button class="chip" data-filter="原创模拟">原创模拟</button><button class="chip" data-filter="community">社区拾光</button><button class="chip" data-filter="mine">我的创作</button></div>
         <button id="customBtn" class="custom-passage-btn"><span>＋</span> 添加自己的文章</button>
         <div id="passageList" class="passage-list"></div>
       </aside>
@@ -42,12 +41,6 @@
         <div class="reader-head">
           <div><div id="sourceBadge" class="source-badge">真题主题仿写</div><h2 id="passageTitle">Social Battery</h2><p id="passageMeta">2026 · 社会交往 · 中等</p></div>
           <button id="favoriteBtn" class="icon-btn heart" aria-label="收藏">♡</button>
-        </div>
-
-        <div class="exam-strip">
-          <div class="phase"><span id="phaseDot"></span><div><small>当前阶段</small><b id="phaseLabel">自由练习</b></div></div>
-          <div class="timer" id="timer">01:30</div>
-          <div class="exam-actions"><button id="prepBtn">60秒准备</button><button id="examBtn" class="dark-btn">90秒朗读</button></div>
         </div>
 
         <div class="tool-row">
@@ -63,10 +56,11 @@
 
         <section class="record-card">
           <div class="record-main">
-            <button id="recordBtn" class="record-btn"><span></span></button>
+            <div class="record-options"><button id="prepBtn" class="prepare-record-btn">准备 60 秒后开始</button><button id="recordBtn" class="record-direct-btn"><span></span><b>直接开始录音</b></button></div>
             <div><b id="recordLabel">点击开始录音（自动识别和评分）</b><p>录音保存在当前浏览器；语音识别可能调用设备或浏览器服务</p></div>
             <div id="recordTime" class="record-time">00:00</div>
           </div>
+          <div class="record-phase"><div class="phase"><span id="phaseDot"></span><div><small>当前阶段</small><b id="phaseLabel">自由练习</b></div></div><div class="timer" id="timer">01:00</div></div>
           <audio id="audioPlayback" controls hidden></audio>
         </section>
 
@@ -102,11 +96,12 @@
           </div>
         </section>
 
-        <section class="self-check">
-          <div class="section-title"><div><span class="eyebrow">QUICK REVIEW</span><h3>本次自评</h3></div><span id="scoreText">0 / 4</span></div>
-          <div class="checks"><label><input type="checkbox"> 发音清晰</label><label><input type="checkbox"> 停顿自然</label><label><input type="checkbox"> 重音准确</label><label><input type="checkbox"> 时间内完成</label></div>
-          <textarea id="notes" placeholder="记下易错词、连读或停顿问题……"></textarea>
-          <button id="saveBtn" class="primary-btn save-btn">保存本次练习</button>
+        <section class="self-check vocabulary-section">
+          <div class="section-title"><div><span class="eyebrow">VOCABULARY NOTES</span><h3>本文生词记录</h3></div></div>
+          <p class="vocabulary-help">选择一种标记方式，然后直接点击上方文章中的单词；可再次点击取消选择。</p>
+          <div class="vocabulary-actions"><button id="markPronunciationBtn" class="ghost-btn">标记不会读</button><button id="markMeaningBtn" class="ghost-btn">标记不认识</button><button id="finishWordMarkBtn" class="primary-btn" hidden>完成并保存</button></div>
+          <p id="wordMarkStatus" class="word-mark-status">尚未进入单词标记模式。</p>
+          <div class="article-vocabulary"><div><h4>不会读的</h4><div id="articlePronunciationWords" class="vocabulary-word-list"></div></div><div><h4>不认识的</h4><div id="articleMeaningWords" class="vocabulary-word-list"></div></div></div>
         </section>
       </article>
     </section>
@@ -122,6 +117,16 @@
     <button id="learningCardClose" class="learning-card-close" aria-label="关闭卡片">×</button>
     <div id="learningCardContent"></div>
   </aside>
+
+  <div id="vocabBookModal" class="modal-backdrop" hidden>
+    <section class="custom-modal vocabulary-book-modal" role="dialog" aria-modal="true" aria-labelledby="vocabBookTitle">
+      <button id="vocabBookClose" class="learning-card-close" aria-label="关闭">×</button>
+      <span class="eyebrow">MY VOCABULARY BOOK</span>
+      <h2 id="vocabBookTitle">我的生词本</h2>
+      <p class="account-intro">汇总练过的所有文章。点击任意单词即可听发音。</p>
+      <div class="vocabulary-book-grid"><section><h3>不会读的</h3><div id="bookPronunciationWords" class="vocabulary-word-list"></div></section><section><h3>不认识的</h3><div id="bookMeaningWords" class="vocabulary-word-list"></div></section></div>
+    </section>
+  </div>
 
   <div id="customModal" class="modal-backdrop" hidden>
     <section class="custom-modal" role="dialog" aria-modal="true" aria-labelledby="customModalTitle">
@@ -147,7 +152,7 @@
       <img id="photoPreview" class="photo-preview" alt="待识别的文章照片" hidden>
       <div id="ocrStatus" class="ocr-status" role="status" hidden><span></span><p>准备识别…</p></div>
       <p id="customError" class="form-error" role="alert"></p>
-      <div class="modal-actions"><button id="customCancel" class="ghost-btn">取消</button><button id="createPracticeBtn" class="primary-btn">生成朗读练习</button></div>
+      <div class="modal-actions"><button id="customCancel" class="ghost-btn">取消</button><button id="createPracticeBtn" class="primary-btn">保存文章</button></div>
     </section>
   </div>
 
@@ -168,7 +173,6 @@
         <div class="account-summary"><div class="account-avatar">✓</div><div><b id="accountName"></b><p>用户 ID：<code id="accountId"></code></p><p>当前权限：<strong id="accountRole">普通用户</strong></p></div></div>
         <div id="syncStatus" class="sync-status">正在检查云端数据…</div>
         <p id="adminSetupHint" class="admin-setup-hint" hidden></p>
-        <div class="account-section"><div class="account-section-head"><h3>我的文章</h3><span>私人文章只有你自己可见</span></div><div id="cloudArticleList" class="cloud-article-list"></div></div>
         <button id="openAdminBtn" class="ghost-btn admin-entry" hidden>进入投稿审核</button>
         <div class="modal-actions"><button id="syncNowBtn" class="ghost-btn">立即同步</button><button id="logoutBtn" class="danger-btn">退出登录</button></div>
       </div>
@@ -189,6 +193,6 @@
   <script src="vendor/tesseract/tesseract.min.js"></script>
   <script src="local-dictionary.js"></script>
   <script src="local-translations.js"></script>
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

@@ -59,11 +59,12 @@ passages.slice(0,8).flatMap(item=>splitSentences(item.text)).forEach((sentence,i
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-let current = passages[0], filter = 'all', mediaRecorder, chunks = [], recordInterval, recordSeconds = 0, timerInterval, utterance;
+let current = passages[0], filter = 'all', editingPassageId = null, mediaRecorder, chunks = [], recordInterval, recordSeconds = 0, timerInterval, utterance;
 let recognition, recognitionActive = false, recognizedFinal = '', recognizedInterim = '', recognizedArchive = '';
 let recognitionSessionAvailable = false;
 const RecognitionEngine = window.SpeechRecognition || window.webkitSpeechRecognition;
 let answerRecorder,answerStream,answerChunks=[],answerRecognition,answerTimerInterval,answerGradeTimeout,answerSeconds=40,answerActive=false,answerFinal='',answerInterim='',answerAudioUrl='',questionIndex=0,questionResults=[];
+let wordMarkMode=null,wordMarkSelection=new Set();
 const savedProgress=readLocalJson('readingProgress',{});
 const progress=savedProgress&&typeof savedProgress==='object'&&!Array.isArray(savedProgress)?savedProgress:{};
 const savedFavorites=readLocalJson('readingFavorites',[]);
@@ -78,28 +79,30 @@ let ocrProgressReporter = () => {};
 
 function toast(message){const t=$('#toast');t.textContent=message;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1900)}
 function splitSentences(text){return text.match(/[^.!?]+[.!?]+|[^.!?]+$/g)||[text]}
+function displayType(type){return type==='我的文章'?'我的创作':['社区精选','社区拾光'].includes(type)?'社区拾光':type}
+function matchesFilter(passage){if(filter==='all')return true;if(filter==='mine')return passage.type==='我的文章';if(filter==='community')return ['社区精选','社区拾光'].includes(passage.type);return passage.type===filter}
+function scoreSummary(id){const saved=progress[id];if(!saved)return'';const parts=[];if(saved.score!=null)parts.push(`朗读 ${saved.score}分`);if(saved.questionResults?.length)parts.push(`问答 ${saved.questionScore||0}/6`);return parts.length?`<strong class="passage-score">${escapeHtml(parts.join(' · '))}</strong>`:''}
 function renderList(){
   const term=$('#searchInput').value.trim().toLowerCase();
-  const items=passages.filter(p=>(filter==='all'||p.type===filter)&&(`${p.title} ${p.topic} ${p.text}`.toLowerCase().includes(term)));
-  $('#passageList').innerHTML=items.map(p=>`<a class="passage-item ${p.id===current.id?'active':''}" href="#practice/${encodeURIComponent(p.id)}" data-id="${escapeHtml(p.id)}"><small>${escapeHtml(p.type)}</small><b>${escapeHtml(p.title)}</b><span>${escapeHtml(p.year)} · ${escapeHtml(p.topic)} · ${escapeHtml(p.level)}${progress[p.id]?' · 已练习':''}</span></a>`).join('')||'<p class="small">没有找到匹配内容</p>';
+  const items=passages.filter(p=>matchesFilter(p)&&(`${p.title} ${p.topic} ${p.text}`.toLowerCase().includes(term)));
+  $('#passageList').innerHTML=items.map(p=>{const mine=p.type==='我的文章',info=submissionStatuses.get(p.id),status=info?.status||'';return`<div class="passage-card ${mine?'my-passage-card':''}"><a class="passage-item ${p.id===current.id?'active':''}" href="#practice/${encodeURIComponent(p.id)}" data-id="${escapeHtml(p.id)}"><small>${escapeHtml(displayType(p.type))}</small><b>${escapeHtml(p.title)}</b><span>${escapeHtml(p.year)} · ${escapeHtml(p.topic)} · ${escapeHtml(p.level)}${progress[p.id]?' · 已练习':''}</span>${scoreSummary(p.id)}</a>${mine?`<div class="passage-card-actions"><button data-edit="${escapeHtml(p.id)}">修改</button><button data-delete="${escapeHtml(p.id)}" class="delete-article-btn">删除</button><button data-submit="${escapeHtml(p.id)}" class="submit-article-btn" ${['submitted','published'].includes(status)?'disabled':''}>${escapeHtml(statusLabel(status))}</button></div>${info?.reviewNote?`<p class="passage-review-note">审核意见：${escapeHtml(info.reviewNote)}</p>`:''}`:''}</div>`}).join('')||'<p class="small">没有找到匹配内容</p>';
 }
 function openPassage(id){selectPassage(id);document.body.classList.add('practice-open');location.hash=`practice/${encodeURIComponent(current.id)}`;window.scrollTo({top:0,behavior:'smooth'})}
 function showLibrary(){if(mediaRecorder?.state==='recording'||answerActive){toast('请先结束当前录音');return}stopAnswerPractice();document.body.classList.remove('practice-open');location.hash='library';setTimeout(()=>$('#library').scrollIntoView({block:'start'}),0)}
 function restorePracticeRoute(){const match=location.hash.match(/^#practice\/(.+)$/);if(!match)return;let id='';try{id=decodeURIComponent(match[1])}catch{}if(passages.some(item=>item.id===id)){if(!document.body.classList.contains('practice-open')||current.id!==id)selectPassage(id);document.body.classList.add('practice-open')}}
 function selectPassage(id){
   if(mediaRecorder?.state==='recording'||answerActive){toast('请先结束当前录音');return}
-  stopSpeech(); stopTimer(); closeLearningCard(); current=passages.find(p=>p.id===id)||passages[0];
+  stopSpeech(); stopTimer(); closeLearningCard(); wordMarkMode=null;current=passages.find(p=>p.id===id)||passages[0];
   recognitionActive=false;if(recognition){try{recognition.abort()}catch{}}$('#resultCard').hidden=true;
   $('#recordLabel').textContent='点击开始录音（自动识别和评分）';
-  $('#sourceBadge').textContent=current.type; $('#passageTitle').textContent=current.title;
+  $('#sourceBadge').textContent=displayType(current.type); $('#passageTitle').textContent=current.title;
   $('#passageMeta').textContent=`${current.year} · ${current.topic} · ${current.level}`;
   const sentences=splitSentences(current.text); $('#passageText').innerHTML=sentences.map((s,i)=>`<span class="sentence" data-index="${i}">${escapeHtml(s.trim())} </span>`).join('');
   $('#wordCount').textContent=current.text.trim().split(/\s+/).length;
   renderQuestions();
-  $('#favoriteBtn').textContent=favorites.has(id)?'♥':'♡'; $('#notes').value=progress[id]?.notes||'';
-  $$('.checks input').forEach((c,i)=>c.checked=Boolean(progress[id]?.checks?.[i])); updateScore();
+  $('#favoriteBtn').textContent=favorites.has(id)?'♥':'♡';renderArticleVocabulary();
   const previous=progress[id];
-  if(previous?.transcript){renderAssessment(previous.transcript);$('#recordLabel').textContent=`已恢复上次练习结果（${new Date(previous.date).toLocaleDateString()}）`}
+  if(previous?.transcript){renderAssessment(previous.transcript,false);$('#recordLabel').textContent=`已恢复上次练习结果（${new Date(previous.date).toLocaleDateString()}）`}
   else if(previous?.score!=null){$('#resultCard').hidden=false;$('#readingScore').textContent=previous.score;$('#correctCount').textContent=previous.correct||0;$('#wrongCount').textContent=previous.wrong||0;$('#omittedCount').textContent=previous.omitted||0;$('#extraCount').textContent=previous.extra||0;$('#recognizedText').textContent='上次练习未保存语音识别文本。'}
   renderList();
 }
@@ -107,7 +110,7 @@ function renderQuestions(){
   stopAnswerPractice();questionResults=Array.isArray(progress[current.id]?.questionResults)?progress[current.id].questionResults:[];
   const questions=Array.isArray(current.questions)?current.questions:[],sourceUrl=safeExternalUrl(current.sourceUrl),box=$('#questions');
   $('#questionPracticePanel').hidden=true;
-  if(!questions.length){box.innerHTML=`<p>${current.type==='社区精选'?'这篇文章暂未设置回答问题。':'这篇文章还没有回答问题；自定义文章可在添加时录入三组问题和参考答案。'}</p>`;return}
+  if(!questions.length){box.innerHTML=`<p>${['社区精选','社区拾光'].includes(current.type)?'这篇文章暂未设置回答问题。':'这篇文章还没有回答问题；“我的创作”可点击卡片上的“修改”补充三组问题和参考答案。'}</p>`;return}
   const canPractice=Array.isArray(current.answers)&&current.answers.length===questions.length&&current.answers.every(Boolean);
   box.innerHTML=`<ol>${questions.map(q=>`<li>${escapeHtml(q)}</li>`).join('')}</ol><p class="exam-question-note">仿真流程：逐题显示并朗读问题，每题限时 40 秒。浏览器根据语音识别文本与参考答案要点给出 0–2 分练习估分。</p>${canPractice?'<button id="startQuestionsBtn" class="primary-btn">开始回答问题</button>':'<p class="card-error">这篇文章没有完整参考答案，暂时不能自动评分。</p>'}${sourceUrl?`<p><a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer">查看资料依据与来源说明 ↗</a></p>`:''}`;
   if(canPractice)$('#startQuestionsBtn').onclick=startQuestionPractice;
@@ -125,9 +128,10 @@ function speak(){
 function startTimer(seconds,label,autoRecord=false){
   stopTimer();let left=seconds;$('#phaseLabel').textContent=label;$('#phaseDot').style.background=label==='准备时间'?'#f6c875':'#ef8460';
   const draw=()=>$('#timer').textContent=`${String(Math.floor(left/60)).padStart(2,'0')}:${String(left%60).padStart(2,'0')}`;draw();
-  timerInterval=setInterval(async()=>{left--;draw();if(left<=0){stopTimer();toast(label==='准备时间'?'准备结束，开始朗读':'时间到');if(label==='准备时间')startTimer(90,'朗读时间');if(autoRecord&&mediaRecorder?.state==='recording')stopRecording(true)}},1000)
+  timerInterval=setInterval(async()=>{left--;draw();if(left<=0){stopTimer();if(label==='准备时间'){toast('准备结束，正在自动开始录音');$('#recordLabel').textContent='准备结束，正在请求麦克风权限…';await toggleRecord()}else{toast('时间到');if(autoRecord&&mediaRecorder?.state==='recording')stopRecording(true)}}},1000)
 }
 function stopTimer(){clearInterval(timerInterval);timerInterval=null}
+function startPreparation(){if(mediaRecorder?.state==='recording'){toast('当前已经在录音');return}if(answerActive){toast('请先完成当前问题作答');return}$('#recordLabel').textContent='60 秒准备中；倒计时结束后将自动开始录音，也可点击下方录音按钮直接开始';startTimer(60,'准备时间')}
 
 function escapeHtml(value){const node=document.createElement('div');node.textContent=String(value??'');return node.innerHTML}
 function safeExternalUrl(value){try{const raw=String(value||'').trim();if(!raw)return'';const url=new URL(raw,location.href);return ['http:','https:'].includes(url.protocol)?url.href:''}catch{return''}}
@@ -138,6 +142,26 @@ function speakWord(word){
   const voices=synthesis.getVoices();voiceLine.voice=voices.find(v=>v.lang==='en-US')||voices.find(v=>v.lang.startsWith('en'))||null;
   synthesis.speak(voiceLine);
 }
+function vocabularyButtons(words,emptyText='还没有记录'){return words?.length?words.map(word=>`<button type="button" data-vocab-word="${escapeHtml(word)}">${escapeHtml(word)} <span>▶</span></button>`).join(''):`<p>${emptyText}</p>`}
+function renderArticleVocabulary(){
+  const saved=progress[current.id]||{};$('#articlePronunciationWords').innerHTML=vocabularyButtons(saved.unpronounceableWords);$('#articleMeaningWords').innerHTML=vocabularyButtons(saved.unknownWords);$('#wordMarkStatus').textContent='尚未进入单词标记模式。';$('#finishWordMarkBtn').hidden=true;$('#markPronunciationBtn').classList.remove('active');$('#markMeaningBtn').classList.remove('active')
+}
+function renderSelectablePassage(){
+  const box=$('#passageText');box.textContent='';let last=0;const rx=/[A-Za-z]+(?:[’'][A-Za-z]+)?/g;let match;
+  while((match=rx.exec(current.text))){box.append(document.createTextNode(current.text.slice(last,match.index)));const word=normalizeWord(match[0]),span=document.createElement('span');span.className=`vocab-select-word${wordMarkSelection.has(word)?' selected':''}`;span.textContent=match[0];span.dataset.markWord=word;span.tabIndex=0;span.setAttribute('role','button');box.append(span);last=rx.lastIndex}box.append(document.createTextNode(current.text.slice(last)))
+}
+function beginWordMark(mode){
+  if(mediaRecorder?.state==='recording'||answerActive){toast('请先结束当前录音');return}stopSpeech();wordMarkMode=mode;const key=mode==='pronunciation'?'unpronounceableWords':'unknownWords';wordMarkSelection=new Set(progress[current.id]?.[key]||[]);renderSelectablePassage();$('#markPronunciationBtn').classList.toggle('active',mode==='pronunciation');$('#markMeaningBtn').classList.toggle('active',mode==='meaning');$('#finishWordMarkBtn').hidden=false;$('#wordMarkStatus').textContent=mode==='pronunciation'?'正在标记“不会读”的单词，请在文章中点击选择。':'正在标记“不认识”的单词，请在文章中点击选择。';$('#passageText').scrollIntoView({behavior:'smooth',block:'center'})
+}
+function toggleMarkedWord(target){if(!wordMarkMode)return;const word=target.dataset.markWord;if(wordMarkSelection.has(word))wordMarkSelection.delete(word);else wordMarkSelection.add(word);target.classList.toggle('selected',wordMarkSelection.has(word))}
+function finishWordMark(){
+  if(!wordMarkMode)return;const previous=progress[current.id]||{},key=wordMarkMode==='pronunciation'?'unpronounceableWords':'unknownWords';progress[current.id]={...previous,date:new Date().toISOString(),[key]:[...wordMarkSelection].sort()};localStorage.setItem('readingProgress',JSON.stringify(progress));wordMarkMode=null;$('#doneCount').textContent=Object.keys(progress).length;scheduleCloudSync();selectPassage(current.id);renderVocabularyBook();toast(cloudUser?'生词记录已保存并等待同步':'生词记录已保存在本机')
+}
+function renderVocabularyBook(){
+  const pronunciation=new Set(),meaning=new Set();Object.values(progress).forEach(item=>{(item.unpronounceableWords||[]).forEach(word=>pronunciation.add(word));(item.unknownWords||[]).forEach(word=>meaning.add(word))});$('#bookPronunciationWords').innerHTML=vocabularyButtons([...pronunciation].sort(),'还没有“不会读”的单词');$('#bookMeaningWords').innerHTML=vocabularyButtons([...meaning].sort(),'还没有“不认识”的单词')
+}
+function openVocabularyBook(){closeLearningCard();renderVocabularyBook();$('#vocabBookModal').hidden=false}
+function closeVocabularyBook(){$('#vocabBookModal').hidden=true}
 function positionLearningCard(rect){
   const card=$('#learningCard');card.hidden=false;
   const width=Math.min(390,window.innerWidth-24),gap=10;
@@ -234,10 +258,13 @@ function handleTextSelection(){
   },0);
 }
 
-function openCustomModal(){
+function resetCustomForm(){editingPassageId=null;$('#customTitle').value='';$('#customText').value='';[1,2,3].forEach(i=>{$(`#customQuestion${i}`).value='';$(`#customAnswer${i}`).value=''});$('#photoInput').value='';$('#photoPreview').hidden=true;$('#ocrStatus').hidden=true;$('#customModalTitle').textContent='添加自己的朗读文章';$('#createPracticeBtn').textContent='保存文章'}
+function openCustomModal(article=null){
+  resetCustomForm();
+  if(article){editingPassageId=article.id;$('#customModalTitle').textContent='修改我的文章与问答';$('#createPracticeBtn').textContent='保存修改';$('#customTitle').value=article.title||'';$('#customText').value=article.text||'';[1,2,3].forEach((i,index)=>{$(`#customQuestion${i}`).value=article.questions?.[index]||'';$(`#customAnswer${i}`).value=article.answers?.[index]||''})}
   $('#customModal').hidden=false;$('#customError').textContent='';setTimeout(()=>$('#customTitle').focus(),0);
 }
-function closeCustomModal(){if($('#ocrStatus').dataset.running==='true')return;$('#customModal').hidden=true}
+function closeCustomModal(){if($('#ocrStatus').dataset.running==='true')return;$('#customModal').hidden=true;resetCustomForm()}
 function cleanOcrText(text){return text.replace(/([A-Za-z])-\s*\n\s*([a-z])/g,'$1$2').replace(/\r/g,'').replace(/\n{2,}/g,'\n\n').replace(/([^\n])\n(?=[^\n])/g,'$1 ').replace(/[ \t]+/g,' ').trim()}
 async function prepareOcrImage(file){
   if(!('createImageBitmap' in self))return file;
@@ -286,11 +313,12 @@ function createCustomPractice(){
   if(words.length>800){$('#customError').textContent='文章请控制在 800 个英文单词以内。';return}
   const questions=[1,2,3].map(i=>$(`#customQuestion${i}`).value.trim()),answers=[1,2,3].map(i=>$(`#customAnswer${i}`).value.trim()),questionFields=[...questions,...answers];
   if(questionFields.some(Boolean)&&questionFields.some(value=>!value)){$('#customError').textContent='如需回答问题练习，请完整填写 3 个问题和 3 个参考答案。';return}
-  const text=raw.replace(/\s+/g,' ').trim(),title=$('#customTitle').value.trim()||`我的朗读 ${customPassages.length+1}`;
-  const passage={id:`custom-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,title,year:new Date().getFullYear(),topic:'自定义',level:`${words.length}词`,type:'我的文章',source:'用户添加',sourceUrl:'',text,questions:questions.filter(Boolean),answers:answers.filter(Boolean)};
-  customPassages.push(passage);passages.push(passage);localStorage.setItem('customReadingPassages',JSON.stringify(customPassages));
-  $('#customModal').hidden=true;$('#customTitle').value='';$('#customText').value='';[1,2,3].forEach(i=>{$(`#customQuestion${i}`).value='';$(`#customAnswer${i}`).value=''});$('#photoInput').value='';$('#photoPreview').hidden=true;$('#ocrStatus').hidden=true;
-  $('#totalCount').textContent=passages.length;filter='all';$$('.chip').forEach(chip=>chip.classList.toggle('active',chip.dataset.filter==='all'));openPassage(passage.id);scheduleCloudSync();toast(cloudUser?'自定义文章已保存并等待同步':'自定义文章已加入本机题库');
+  const text=raw.replace(/\r/g,'').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim(),title=$('#customTitle').value.trim()||`我的朗读 ${customPassages.length+1}`;
+  const existing=editingPassageId?customPassages.find(item=>item.id===editingPassageId):null;
+  const passage={id:existing?.id||`custom-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,title,year:existing?.year||new Date().getFullYear(),topic:'自定义',level:`${words.length}词`,type:'我的文章',source:'用户添加',sourceUrl:'',text,questions:questions.filter(Boolean),answers:answers.filter(Boolean)};
+  if(existing)Object.assign(existing,passage);else{customPassages.push(passage);passages.push(passage)}
+  localStorage.setItem('customReadingPassages',JSON.stringify(customPassages));$('#customModal').hidden=true;resetCustomForm();
+  $('#totalCount').textContent=passages.length;filter='mine';$$('.chip').forEach(chip=>chip.classList.toggle('active',chip.dataset.filter==='mine'));openPassage(passage.id);scheduleCloudSync();toast(cloudUser?'文章已保存并等待同步':'文章已保存在本机');
 }
 
 async function apiRequest(path,options={}){
@@ -315,7 +343,7 @@ function mergeCloudState(remote={}){
   for(const article of articles.values())if(!existingIds.has(article.id)){customPassages.push(article);passages.push(article)}
   for(const [id,value] of Object.entries(remote.progress||{})){const local=progress[id];if(!local||String(value.date||'')>String(local.date||''))progress[id]=value}
   localStorage.setItem('customReadingPassages',JSON.stringify(customPassages));localStorage.setItem('readingProgress',JSON.stringify(progress));
-  $('#totalCount').textContent=passages.length;$('#doneCount').textContent=Object.keys(progress).length;selectPassage(current.id);
+  $('#totalCount').textContent=passages.length;$('#doneCount').textContent=Object.keys(progress).length;selectPassage(current.id);renderVocabularyBook();
 }
 async function syncCloudData(){
   if(!cloudUser)return;
@@ -325,11 +353,28 @@ async function syncCloudData(){
 }
 function scheduleCloudSync(){if(!cloudUser)return;clearTimeout(cloudSyncTimer);cloudSyncTimer=setTimeout(syncCloudData,700)}
 async function loadSubmissionStatuses(){
-  if(!cloudUser)return;try{const data=await apiRequest('/api/submissions');submissionStatuses.clear();data.submissions.forEach(item=>submissionStatuses.set(item.articleId,item))}catch{}
+  if(!cloudUser)return;try{const data=await apiRequest('/api/submissions');submissionStatuses.clear();data.submissions.forEach(item=>submissionStatuses.set(item.articleId,item));renderList()}catch{}
 }
-function statusLabel(status){return{submitted:'审核中',published:'已发布',rejected:'已退回'}[status]||'投稿到公共题库'}
+function statusLabel(status){return{submitted:'审核中',published:'已发布',rejected:'重新提交'}[status]||'提交精选'}
+async function submitArticle(articleId,button){
+  if(!cloudUser){toast('请先登录，再提交文章');openAccountModal();return}
+  if(!confirm('请确认文章不含个人敏感信息，并且你有权将其投稿到“社区拾光”。是否继续？'))return;
+  button.disabled=true;button.textContent='正在提交…';
+  try{await syncCloudData();await apiRequest('/api/submissions',{method:'POST',body:JSON.stringify({articleId})});await loadSubmissionStatuses();toast('文章已提交管理员审核')}
+  catch(error){button.disabled=false;button.textContent='重试提交';toast(error.message)}
+}
+function editCustomArticle(articleId){const article=customPassages.find(item=>item.id===articleId);if(article)openCustomModal(article)}
+async function deleteCustomArticle(articleId){
+  const article=customPassages.find(item=>item.id===articleId);if(!article||!confirm(`确定删除“${article.title}”吗？文章、三组问答和练习记录都会删除。`))return;
+  try{
+    if(cloudUser){await apiRequest('/api/submissions',{method:'DELETE',body:JSON.stringify({articleId})});await apiRequest('/api/sync',{method:'DELETE',body:JSON.stringify({articleId})})}
+    customPassages=customPassages.filter(item=>item.id!==articleId);const index=passages.findIndex(item=>item.id===articleId);if(index>=0)passages.splice(index,1);delete progress[articleId];submissionStatuses.delete(articleId);
+    localStorage.setItem('customReadingPassages',JSON.stringify(customPassages));localStorage.setItem('readingProgress',JSON.stringify(progress));$('#totalCount').textContent=passages.length;$('#doneCount').textContent=Object.keys(progress).length;
+    if(current.id===articleId)selectPassage(passages[0].id);else renderList();toast('文章已删除')
+  }catch(error){toast(`删除失败：${error.message}`)}
+}
 function renderCloudArticles(){
-  const box=$('#cloudArticleList');if(!customPassages.length){box.innerHTML='<p class="account-intro">还没有自定义文章。</p>';return}
+  const box=$('#cloudArticleList');if(!box)return;if(!customPassages.length){box.innerHTML='<p class="account-intro">还没有自定义文章。</p>';return}
   box.innerHTML=customPassages.map(article=>{const info=submissionStatuses.get(article.id),status=info?.status||'';return`<div class="cloud-article-item"><div><b>${escapeHtml(article.title)}</b><small>${escapeHtml(article.level||'')} ${info?.reviewNote?`· 审核意见：${escapeHtml(info.reviewNote)}`:''}</small></div><button data-submit="${escapeHtml(article.id)}" ${['submitted','published'].includes(status)?'disabled':''}>${statusLabel(status)}</button></div>`}).join('');
   box.querySelectorAll('[data-submit]').forEach(button=>button.onclick=async()=>{if(!confirm('请确认文章不含个人敏感信息，并且你有权将其投稿到公共题库。是否继续？'))return;button.disabled=true;button.textContent='正在提交…';try{await syncCloudData();await apiRequest('/api/submissions',{method:'POST',body:JSON.stringify({articleId:button.dataset.submit})});await loadSubmissionStatuses();renderCloudArticles();toast('文章已提交管理员审核')}catch(error){button.disabled=false;button.textContent='重试投稿';toast(error.message)}})
 }
@@ -337,7 +382,7 @@ function renderAccount(){
   $('#signedOutView').hidden=Boolean(cloudUser);$('#signedInView').hidden=!cloudUser;$('#accountBtn').classList.toggle('signed-in',Boolean(cloudUser));$('#accountBtn').textContent=cloudUser?cloudUser.username:'登录 / 同步';
   if(!cloudUser)return;
   const isAdmin=cloudUser.roles?.includes('admin'),hint=$('#adminSetupHint');$('#accountName').textContent=cloudUser.username;$('#accountId').textContent=cloudUser.id;$('#accountRole').textContent=isAdmin?'管理员':'普通用户';$('#openAdminBtn').hidden=!isAdmin;
-  hint.hidden=isAdmin;hint.textContent=cloudUser.adminConfigured?'服务器已读取 ADMIN_USER_IDS，但其中没有当前用户 ID。请核对环境变量值是否与上方 ID 完全一致，然后重新部署。':'服务器尚未读取到 ADMIN_USER_IDS。请在 Netlify 环境变量中设置当前用户 ID，并重新部署。';renderCloudArticles();
+  hint.hidden=isAdmin;hint.textContent=cloudUser.adminConfigured?'服务器已读取 ADMIN_USER_IDS，但其中没有当前用户 ID。请核对环境变量值是否与上方 ID 完全一致，然后重新部署。':'服务器尚未读取到 ADMIN_USER_IDS。请在 Netlify 环境变量中设置当前用户 ID，并重新部署。';
 }
 function openAccountModal(){closeLearningCard();$('#accountModal').hidden=false;renderAccount();setTimeout(()=>cloudUser?$('#syncNowBtn').focus():$('#authUsername').focus(),0)}
 function closeAccountModal(){$('#accountModal').hidden=true}
@@ -347,7 +392,7 @@ async function authenticate(mode){
   catch(problem){error.textContent=problem.message}
 }
 async function logout(){
-  try{await apiRequest('/api/auth/logout',{method:'POST'});}catch{}cloudUser=null;submissionStatuses.clear();renderAccount();closeAccountModal();toast('已退出登录；本机缓存仍保留在此设备')
+  try{await apiRequest('/api/auth/logout',{method:'POST'});}catch{}cloudUser=null;submissionStatuses.clear();renderAccount();renderList();closeAccountModal();toast('已退出登录；本机缓存仍保留在此设备')
 }
 async function restoreSession(){
   try{const data=await apiRequest('/api/auth/me');cloudUser=data.user;renderAccount();if(cloudUser)await syncCloudData()}catch{cloudUser=null;renderAccount()}
@@ -389,7 +434,7 @@ function alignWords(source,spoken){
   }
   return{status,extra}
 }
-function renderAssessment(transcript){
+function renderAssessment(transcript,autoSave=true){
   const spoken=getWords(transcript),source=getWords(current.text),{status,extra}=alignWords(source,spoken);
   const counts={correct:0,wrong:0,omitted:0};status.forEach(s=>counts[s]++);
   const errors=counts.wrong+counts.omitted+extra;
@@ -397,7 +442,7 @@ function renderAssessment(transcript){
   const box=$('#passageText');box.textContent='';let last=0,index=0;const rx=/[A-Za-z]+(?:[’'][A-Za-z]+)?|\d+(?:[.,]\d+)*/g;let match;
   while((match=rx.exec(current.text))){box.append(document.createTextNode(current.text.slice(last,match.index)));const span=document.createElement('span');span.className=`word ${status[index]||'omitted'}`;span.textContent=match[0];span.tabIndex=0;span.title=`${status[index]==='correct'?'读对':status[index]==='wrong'?'疑似读错':'疑似漏读'}；点击查看词卡`;box.append(span);last=rx.lastIndex;index++}box.append(document.createTextNode(current.text.slice(last)));
   $('#readingScore').textContent=score;$('#correctCount').textContent=counts.correct;$('#wrongCount').textContent=counts.wrong;$('#omittedCount').textContent=counts.omitted;$('#extraCount').textContent=extra;
-  $('#recognizedText').textContent=transcript||'没有获得有效识别文本，请检查听写、网络及麦克风权限后重试。';$('#resultCard').hidden=false;$('#recordLabel').textContent='识别完成，可查看标色和回放';
+  $('#recognizedText').textContent=transcript||'没有获得有效识别文本，请检查听写、网络及麦克风权限后重试。';$('#resultCard').hidden=false;$('#recordLabel').textContent='识别完成，成绩已自动保存';if(autoSave)savePracticeProgress({saveReading:true});
 }
 function startRecognition(){
   recognizedFinal='';recognizedInterim='';recognizedArchive='';recognitionSessionAvailable=false;$('#resultCard').hidden=false;$('#recognizedText').textContent='正在识别朗读内容……';$('#readingScore').textContent='…';['correctCount','wrongCount','omittedCount','extraCount'].forEach(id=>$(`#${id}`).textContent='—');
@@ -468,7 +513,7 @@ function finishAnswerRecording(){
 }
 function nextQuestion(){
   if(questionIndex<current.questions.length-1){questionIndex++;showActiveQuestion();return}
-  const total=questionResults.reduce((sum,item)=>sum+(item?.points||0),0);$('#nextQuestionBtn').hidden=true;$('#answerFeedback').innerHTML+=`<p class="question-summary">回答问题完成：${total} / ${current.questions.length*2} 分。点击页面底部“保存本次练习”可同步成绩。</p>`;toast(`回答问题完成：${total} / ${current.questions.length*2} 分`);
+  const total=questionResults.reduce((sum,item)=>sum+(item?.points||0),0);$('#nextQuestionBtn').hidden=true;$('#answerFeedback').innerHTML+=`<p class="question-summary">回答问题完成：${total} / ${current.questions.length*2} 分，成绩已自动保存。</p>`;savePracticeProgress({saveQuestions:true});toast(`回答问题完成：${total} / ${current.questions.length*2} 分，已保存`);
 }
 function stopAnswerPractice(){
   clearInterval(answerTimerInterval);clearTimeout(answerGradeTimeout);answerTimerInterval=null;answerGradeTimeout=null;answerActive=false;
@@ -482,32 +527,38 @@ async function toggleRecord(){
   try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks=[];mediaRecorder=new MediaRecorder(stream);mediaRecorder.ondataavailable=e=>chunks.push(e.data);mediaRecorder.onstop=()=>{const url=URL.createObjectURL(new Blob(chunks,{type:mediaRecorder.mimeType}));$('#audioPlayback').src=url;$('#audioPlayback').hidden=false;stream.getTracks().forEach(t=>t.stop())};mediaRecorder.start();startRecognition();recordSeconds=0;$('#recordTime').textContent='00:00';$('#recordBtn').classList.add('recording');$('#recordLabel').textContent='正在录音并识别，90秒后自动停止';startTimer(90,'朗读时间',true);recordInterval=setInterval(()=>{recordSeconds++;$('#recordTime').textContent=`${String(Math.floor(recordSeconds/60)).padStart(2,'0')}:${String(recordSeconds%60).padStart(2,'0')}`},1000)}catch(e){toast('无法使用麦克风，请检查浏览器权限')}
 }
 function stopRecording(fromTimer=false){if(mediaRecorder?.state==='recording')mediaRecorder.stop();finishRecognition();clearInterval(recordInterval);if(!fromTimer)stopTimer();$('#recordBtn').classList.remove('recording');$('#recordLabel').textContent=fromTimer?'90秒结束，正在生成识别报告':'录音完成，正在生成识别报告'}
-function updateScore(){const n=$$('.checks input:checked').length;$('#scoreText').textContent=`${n} / 4`}
+function savePracticeProgress({saveReading=false,saveQuestions=false,notify=false}={}){
+  const previous=progress[current.id]||{},next={...previous,date:new Date().toISOString()};
+  if(saveReading)Object.assign(next,{seconds:recordSeconds,score:Number($('#readingScore').textContent)||0,correct:Number($('#correctCount').textContent)||0,wrong:Number($('#wrongCount').textContent)||0,omitted:Number($('#omittedCount').textContent)||0,extra:Number($('#extraCount').textContent)||0,transcript:$('#recognizedText').textContent});
+  if(saveQuestions)Object.assign(next,{questionScore:questionResults.reduce((sum,item)=>sum+(item?.points||0),0),questionResults});
+  progress[current.id]=next;localStorage.setItem('readingProgress',JSON.stringify(progress));$('#doneCount').textContent=Object.keys(progress).length;renderList();scheduleCloudSync();if(notify)toast(cloudUser?'练习记录已保存并等待同步':'练习记录已保存在本机')
+}
 
 $('#speakBtn').onclick=speak;$('#stopSpeakBtn').onclick=stopSpeech;$('#rateRange').oninput=e=>$('#rateLabel').textContent=`${Number(e.target.value).toFixed(2)}×`;
 $('#learningCardClose').onclick=closeLearningCard;
+$('#vocabBookBtn').onclick=openVocabularyBook;$('#vocabBookClose').onclick=closeVocabularyBook;$('#vocabBookModal').addEventListener('click',event=>{if(event.target===$('#vocabBookModal'))closeVocabularyBook()});
 $('#accountBtn').onclick=openAccountModal;$('#accountModalClose').onclick=closeAccountModal;$('#accountModal').addEventListener('click',e=>{if(e.target===$('#accountModal'))closeAccountModal()});
 $('#loginBtn').onclick=()=>authenticate('login');$('#registerBtn').onclick=()=>authenticate('register');$('#logoutBtn').onclick=logout;$('#syncNowBtn').onclick=syncCloudData;
 $('#authPassword').addEventListener('keydown',e=>{if(e.key==='Enter')authenticate('login')});$('#openAdminBtn').onclick=openAdmin;$('#adminModalClose').onclick=()=>$('#adminModal').hidden=true;$('#adminModal').addEventListener('click',e=>{if(e.target===$('#adminModal'))$('#adminModal').hidden=true});
-$('#customBtn').onclick=openCustomModal;$('#customModalClose').onclick=closeCustomModal;$('#customCancel').onclick=closeCustomModal;$('#createPracticeBtn').onclick=createCustomPractice;
+$('#customBtn').onclick=()=>openCustomModal();$('#customModalClose').onclick=closeCustomModal;$('#customCancel').onclick=closeCustomModal;$('#createPracticeBtn').onclick=createCustomPractice;
 $('#photoInput').onchange=e=>recognizePhoto(e.target.files?.[0]);$('#customModal').addEventListener('click',e=>{if(e.target===$('#customModal'))closeCustomModal()});
 window.addEventListener('pagehide',()=>{if(ocrWorker)ocrWorker.terminate().catch(()=>{})});
-$('#passageList').addEventListener('click',event=>{const card=event.target.closest('.passage-item');if(!card)return;event.preventDefault();openPassage(card.dataset.id)});
-$('#passageText').addEventListener('click',e=>{const word=e.target.closest('.word');if(word)showWordCard(word.textContent,word.getBoundingClientRect())});
-$('#passageText').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.word')){e.preventDefault();showWordCard(e.target.textContent,e.target.getBoundingClientRect())}});
+$('#passageList').addEventListener('click',event=>{const edit=event.target.closest('[data-edit]'),remove=event.target.closest('[data-delete]'),submit=event.target.closest('[data-submit]');if(edit){editCustomArticle(edit.dataset.edit);return}if(remove){deleteCustomArticle(remove.dataset.delete);return}if(submit){submitArticle(submit.dataset.submit,submit);return}const card=event.target.closest('.passage-item');if(!card)return;event.preventDefault();openPassage(card.dataset.id)});
+$('#passageText').addEventListener('click',e=>{const marked=e.target.closest('[data-mark-word]');if(marked&&wordMarkMode){toggleMarkedWord(marked);return}const word=e.target.closest('.word');if(word)showWordCard(word.textContent,word.getBoundingClientRect())});
+$('#passageText').addEventListener('keydown',e=>{if(!['Enter',' '].includes(e.key))return;const marked=e.target.closest('[data-mark-word]');if(marked&&wordMarkMode){e.preventDefault();toggleMarkedWord(marked);return}if(e.target.matches('.word')){e.preventDefault();showWordCard(e.target.textContent,e.target.getBoundingClientRect())}});
+document.addEventListener('click',event=>{const word=event.target.closest('[data-vocab-word]');if(word)speakWord(word.dataset.vocabWord)});
 $('#passageText').addEventListener('mouseup',handleTextSelection);$('#passageText').addEventListener('touchend',handleTextSelection);
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeLearningCard();closeCustomModal();closeAccountModal();$('#adminModal').hidden=true}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeLearningCard();closeCustomModal();closeAccountModal();closeVocabularyBook();$('#adminModal').hidden=true}});
 document.addEventListener('pointerdown',e=>{const card=$('#learningCard');if(!card.hidden&&!card.contains(e.target)&&!e.target.closest?.('.word'))closeLearningCard()});
 window.addEventListener('hashchange',()=>{if(location.hash.startsWith('#practice/'))restorePracticeRoute();else if(!mediaRecorder||mediaRecorder.state!=='recording')document.body.classList.remove('practice-open')});
-$('#prepBtn').onclick=()=>startTimer(60,'准备时间');$('#examBtn').onclick=()=>startTimer(90,'朗读时间',true);$('#recordBtn').onclick=toggleRecord;
+$('#prepBtn').onclick=startPreparation;$('#recordBtn').onclick=toggleRecord;
 $('#backToLibraryBtn').onclick=showLibrary;$('#playQuestionBtn').onclick=playActiveQuestion;$('#answerRecordBtn').onclick=startAnswerRecording;$('#nextQuestionBtn').onclick=nextQuestion;
-$$('a[href="#library"]').forEach(link=>link.onclick=event=>{event.preventDefault();showLibrary()});$('a[href="#about"]').onclick=event=>{if(mediaRecorder?.state==='recording'||answerActive){event.preventDefault();toast('请先结束当前录音');return}document.body.classList.remove('practice-open')};$('.brand').onclick=event=>{event.preventDefault();if(mediaRecorder?.state==='recording'||answerActive){toast('请先结束当前录音');return}document.body.classList.remove('practice-open');location.hash='';window.scrollTo({top:0,behavior:'smooth'})};
+$$('a[href="#library"]').forEach(link=>link.onclick=event=>{event.preventDefault();showLibrary()});const aboutLink=$('a[href="#about"]');if(aboutLink)aboutLink.onclick=event=>{if(mediaRecorder?.state==='recording'||answerActive){event.preventDefault();toast('请先结束当前录音');return}document.body.classList.remove('practice-open')};$('.brand').onclick=event=>{event.preventDefault();if(mediaRecorder?.state==='recording'||answerActive){toast('请先结束当前录音');return}document.body.classList.remove('practice-open');location.hash='';window.scrollTo({top:0,behavior:'smooth'})};
 $('#searchInput').oninput=renderList;$$('.chip').forEach(b=>b.onclick=()=>{$$('.chip').forEach(x=>x.classList.remove('active'));b.classList.add('active');filter=b.dataset.filter;renderList()});
 $('#questionsToggle').onclick=()=>{const box=$('#questions');box.hidden=!box.hidden;$('#questionsToggle span:last-child').textContent=box.hidden?'＋':'−'};
+$('#markPronunciationBtn').onclick=()=>beginWordMark('pronunciation');$('#markMeaningBtn').onclick=()=>beginWordMark('meaning');$('#finishWordMarkBtn').onclick=finishWordMark;
 $('#favoriteBtn').onclick=()=>{favorites.has(current.id)?favorites.delete(current.id):favorites.add(current.id);localStorage.setItem('readingFavorites',JSON.stringify([...favorites]));selectPassage(current.id)};
-$('#randomBtn').onclick=()=>openPassage(passages[Math.floor(Math.random()*passages.length)].id);
 $('#largerBtn').onclick=()=>{const e=$('#passageText'),n=Math.min(34,parseFloat(getComputedStyle(e).fontSize)+2);e.style.fontSize=n+'px'};
 $('#smallerBtn').onclick=()=>{const e=$('#passageText'),n=Math.max(17,parseFloat(getComputedStyle(e).fontSize)-2);e.style.fontSize=n+'px'};
 $('#focusBtn').onclick=()=>document.body.classList.toggle('focus');$('#themeBtn').onclick=()=>{document.body.classList.toggle('dark');localStorage.setItem('readingTheme',document.body.classList.contains('dark')?'dark':'light')};
-$$('.checks input').forEach(c=>c.onchange=updateScore);$('#saveBtn').onclick=()=>{const assessed=!$('#resultCard').hidden,transcript=assessed?$('#recognizedText').textContent:'',questionScore=questionResults.reduce((sum,item)=>sum+(item?.points||0),0);progress[current.id]={date:new Date().toISOString(),notes:$('#notes').value,checks:$$('.checks input').map(c=>c.checked),seconds:recordSeconds,score:assessed?Number($('#readingScore').textContent)||null:null,correct:assessed?Number($('#correctCount').textContent)||0:0,wrong:assessed?Number($('#wrongCount').textContent)||0:0,omitted:assessed?Number($('#omittedCount').textContent)||0:0,extra:assessed?Number($('#extraCount').textContent)||0:0,transcript,questionScore,questionResults};localStorage.setItem('readingProgress',JSON.stringify(progress));$('#doneCount').textContent=Object.keys(progress).length;renderList();scheduleCloudSync();toast(cloudUser?'练习记录已保存并等待同步':'练习记录已保存在本机')};
-if(localStorage.getItem('readingTheme')==='dark')document.body.classList.add('dark');$('#totalCount').textContent=passages.length;$('#doneCount').textContent=Object.keys(progress).length;renderList();selectPassage(current.id);restorePracticeRoute();renderAccount();restoreSession();loadPublicLibrary();
+if(localStorage.getItem('readingTheme')==='dark')document.body.classList.add('dark');$('#totalCount').textContent=passages.length;$('#doneCount').textContent=Object.keys(progress).length;renderList();selectPassage(current.id);restorePracticeRoute();renderAccount();renderVocabularyBook();restoreSession();loadPublicLibrary();

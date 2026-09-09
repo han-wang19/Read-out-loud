@@ -28,7 +28,7 @@ export default async request => {
       const legacyPublicId = `community-${item.article.id}`
       const publicId = item.publicId || `community-${item.ownerId}-${item.article.id.replace(/^custom-/, '')}`
       if (action === 'publish') {
-        const publicArticle = { ...item.article, id: publicId, type: '社区精选', topic: item.article.topic || '社区投稿', source: '社区投稿 · 管理员审核', publishedAt: new Date().toISOString() }
+        const publicArticle = { ...item.article, id: publicId, type: '社区拾光', topic: item.article.topic || '社区投稿', source: '社区投稿 · 管理员审核', publishedAt: new Date().toISOString() }
         await published.setJSON(publicId, publicArticle)
         if (legacyPublicId !== publicId) await published.delete(legacyPublicId)
         item.publicId = publicId

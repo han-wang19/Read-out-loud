@@ -1,7 +1,7 @@
 export function sanitizeArticle(article) {
   const id = String(article?.id || '')
   const title = String(article?.title || '').trim().slice(0, 80)
-  const text = String(article?.text || '').replace(/\s+/g, ' ').trim().slice(0, 12000)
+  const text = String(article?.text || '').replace(/\r/g, '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 12000)
   const questions = Array.isArray(article?.questions) ? article.questions.slice(0, 3).map(value => String(value || '').trim().slice(0, 200)) : []
   const answers = Array.isArray(article?.answers) ? article.answers.slice(0, 3).map(value => String(value || '').trim().slice(0, 500)) : []
   const hasCompleteQuestions = questions.length === 3 && answers.length === 3 && questions.every(Boolean) && answers.every(Boolean)
@@ -44,6 +44,8 @@ export function sanitizeState(input) {
         points: Math.max(0, Math.min(2, Number(item?.points) || 0)),
         coverage: Math.max(0, Math.min(1, Number(item?.coverage) || 0)),
       })) : [],
+      unpronounceableWords: Array.isArray(value.unpronounceableWords) ? [...new Set(value.unpronounceableWords.map(word => String(word || '').toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean))].slice(0, 300) : [],
+      unknownWords: Array.isArray(value.unknownWords) ? [...new Set(value.unknownWords.map(word => String(word || '').toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean))].slice(0, 300) : [],
     }
   }
   return { articles, progress, updatedAt: new Date().toISOString() }

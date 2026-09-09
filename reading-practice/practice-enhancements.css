@@ -32,3 +32,42 @@ body.practice-open .practice-shell{display:block;max-width:900px;margin:34px aut
 @media(max-width:900px){body:not(.practice-open) .passage-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){body:not(.practice-open) .passage-list{grid-template-columns:1fr}.back-library-btn{margin-bottom:17px}body.practice-open .practice-shell{margin-top:18px}.question-practice{margin:0 10px 12px;padding:14px}.question-practice h3{font-size:18px}.question-record-btn,.question-secondary-btn{width:100%;margin:7px 0 0}}
 .passage-item{text-decoration:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.topbar-actions{margin-left:auto}
+.passage-card{min-width:0}
+.my-passage-card{overflow:hidden;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.my-passage-card .passage-item{border:0;border-radius:0;box-shadow:none}
+.passage-card-actions{display:flex;gap:6px;padding:0 10px 10px}
+.passage-card-actions button{flex:1;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--ink);padding:7px 5px;font-size:11px}
+.passage-card-actions .delete-article-btn{color:#b7463e}
+.passage-card-actions .submit-article-btn{border-color:var(--green);background:var(--green);color:#fff}
+.passage-card-actions button:disabled{opacity:.55;cursor:default}
+.passage-review-note{margin:0;padding:0 10px 10px;color:var(--muted);font-size:10px;line-height:1.5}
+.passage-item .passage-score{display:block;width:max-content;margin-top:9px;padding:4px 7px;border-radius:5px;background:var(--mint);color:var(--green);font-size:11px}
+.record-main{grid-template-columns:minmax(250px,auto) 1fr auto}
+.record-options{display:flex;gap:8px}
+.record-options button{min-height:44px;border-radius:8px;padding:9px 12px;font-size:12px;font-weight:700}
+.prepare-record-btn{border:1px solid var(--green);background:transparent;color:var(--green)}
+.record-direct-btn{display:flex;align-items:center;gap:7px;border:0;background:var(--orange);color:#fff}
+.record-direct-btn span{width:12px;height:12px;border:2px solid #fff;border-radius:50%;background:#fff}
+.record-direct-btn.recording span{border-radius:2px}
+.record-direct-btn.recording b{font-size:0}.record-direct-btn.recording b::after{content:'结束录音';font-size:12px}
+.record-phase{display:flex;align-items:center;justify-content:space-between;margin-top:14px;padding:10px 12px;border-radius:8px;background:var(--green);color:#fff}
+.record-phase .timer{font-size:22px}
+@media(max-width:700px){.record-main{grid-template-columns:1fr}.record-options{grid-column:1}.record-options button{flex:1}.record-time{grid-column:1}.record-phase{margin-top:10px}}
+.vocabulary-help,.word-mark-status{color:var(--muted);font-size:12px;line-height:1.6}
+.vocabulary-actions{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+.vocabulary-actions button{padding:10px 14px}.vocabulary-actions .active{background:var(--mint);box-shadow:0 0 0 2px var(--green)}
+.article-vocabulary,.vocabulary-book-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+.article-vocabulary>div,.vocabulary-book-grid section{padding:14px;border:1px solid var(--line);border-radius:9px;background:var(--paper)}
+.article-vocabulary h4,.vocabulary-book-grid h3{margin:0 0 10px;font-size:14px}
+.vocabulary-word-list{display:flex;flex-wrap:wrap;gap:7px}
+.vocabulary-word-list>p{margin:0;color:var(--muted);font-size:11px}
+.vocabulary-word-list button{border:1px solid var(--line);border-radius:18px;background:var(--card);color:var(--ink);padding:6px 9px;font-size:12px}
+.vocabulary-word-list button:hover{border-color:var(--orange);color:var(--orange)}.vocabulary-word-list button span{margin-left:4px;font-size:9px}
+.vocab-select-word{border-radius:4px;cursor:pointer;outline:none}.vocab-select-word:hover{background:var(--mint)}.vocab-select-word.selected{background:#ffd09d;box-shadow:0 0 0 2px var(--orange)}
+.vocabulary-book-modal{width:min(760px,100%)}
+.passage-text{white-space:pre-wrap}
+.submission-text{white-space:pre-wrap}
+@media(max-width:560px){.article-vocabulary,.vocabulary-book-grid{grid-template-columns:1fr}.vocabulary-actions button{flex:1}.topbar-actions{gap:5px}.topbar-actions .account-btn{padding:7px 8px}}
+body:not(.practice-open) .my-passage-card .passage-item{border:0}
+@media(max-width:900px){body:not(.practice-open) .passage-card{min-width:0}}

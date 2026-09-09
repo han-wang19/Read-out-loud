@@ -22,6 +22,21 @@ export default async request => {
       await submissions.setJSON(key, submission)
       return json({ submission: { articleId, status: 'submitted', updatedAt: now } }, 201)
     }
+    if (request.method === 'DELETE') {
+      checkOrigin(request)
+      const articleId = String((await request.json()).articleId || '')
+      if (!/^custom-[a-z0-9-]+$/i.test(articleId)) return json({ error: '文章 ID 无效' }, 400)
+      const key = `${user.id}/${articleId}`, item = await submissions.get(key, { type: 'json' })
+      if (item) {
+        const publicId = item.publicId || `community-${item.ownerId}-${item.article.id.replace(/^custom-/, '')}`
+        const legacyPublicId = `community-${item.article.id}`
+        const published = getStore('reading-published', { consistency: 'strong' })
+        await published.delete(publicId)
+        if (legacyPublicId !== publicId) await published.delete(legacyPublicId)
+        await submissions.delete(key)
+      }
+      return json({ deleted: true })
+    }
     return json({ error: 'Method not allowed' }, 405)
   } catch (error) { return handleError(error) }
 }
