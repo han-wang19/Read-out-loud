@@ -72,6 +72,10 @@ const favorites=new Set(Array.isArray(savedFavorites)?savedFavorites:[]);
 const lookupCache = new Map(), translationCache = new Map();
 let cardRequest = 0;
 let cloudUser = null, cloudSyncTimer = null, cloudSyncInterval = null, cloudSyncPromise = null;
+// Keeps a deletion from being reintroduced by a sync request that started
+// before the delete finished (for example, the account button was clicked
+// while the automatic sync was still in flight).
+const deletedArticleIds = new Set();
 const submissionStatuses = new Map();
 const publicPassageIds = new Set();
 let ocrWorker = null, ocrWorkerPromise = null, ocrAssetsPromise = null, ocrRunId = 0, ocrWorkerGeneration = 0;
@@ -369,10 +373,10 @@ async function apiRequest(path,options={}){
   return data;
 }
 function setSyncStatus(message,error=false){const box=$('#syncStatus');box.textContent=message;box.classList.toggle('error',error)}
-function cloudState(){return{articles:customPassages,progress}}
+function cloudState(){return{articles:customPassages.filter(article=>!deletedArticleIds.has(article.id)),progress}}
 function mergeCloudState(remote={}){
   const publishedIds=new Map([...submissionStatuses.values()].filter(item=>item.status==='published').map(item=>[item.articleId,item.publicId]));
-  const articles=new Map((remote.articles||[]).filter(item=>!publishedIds.has(item.id)).map(item=>[item.id,item]));customPassages.filter(item=>!publishedIds.has(item.id)).forEach(item=>articles.set(item.id,item));
+  const articles=new Map((remote.articles||[]).filter(item=>!publishedIds.has(item.id)&&!deletedArticleIds.has(item.id)).map(item=>[item.id,item]));customPassages.filter(item=>!publishedIds.has(item.id)&&!deletedArticleIds.has(item.id)).forEach(item=>articles.set(item.id,item));
   const existingIds=new Set(customPassages.map(item=>item.id));
   for(const article of articles.values())if(!existingIds.has(article.id)){customPassages.push(article);passages.push(article)}
   for(const [id,value] of Object.entries(remote.progress||{})){const targetId=publishedIds.get(id)||id,local=progress[targetId];if(!local||String(value.date||'')>String(local.date||''))progress[targetId]=value;if(targetId!==id)delete progress[id]}
@@ -412,11 +416,20 @@ function editCustomArticle(articleId){const article=customPassages.find(item=>it
 async function deleteCustomArticle(articleId){
   const article=customPassages.find(item=>item.id===articleId);if(!article||!confirm(`确定删除“${article.title}”吗？文章、三组问答和练习记录都会删除。`))return;
   try{
-    if(cloudUser){await apiRequest('/api/submissions',{method:'DELETE',body:JSON.stringify({articleId})});await apiRequest('/api/sync',{method:'DELETE',body:JSON.stringify({articleId})})}
+    deletedArticleIds.add(articleId);
+    // A delayed/automatic sync must not PUT the old local list after deletion.
+    // Wait for an in-flight sync, cancel the debounce timer, then perform the
+    // server-side deletes before removing the local copy.
+    if(cloudUser){
+      clearTimeout(cloudSyncTimer);cloudSyncTimer=null;
+      if(cloudSyncPromise)await cloudSyncPromise;
+      await apiRequest('/api/submissions',{method:'DELETE',body:JSON.stringify({articleId})});
+      await apiRequest('/api/sync',{method:'DELETE',body:JSON.stringify({articleId})});
+    }
     customPassages=customPassages.filter(item=>item.id!==articleId);const index=passages.findIndex(item=>item.id===articleId);if(index>=0)passages.splice(index,1);delete progress[articleId];submissionStatuses.delete(articleId);
     localStorage.setItem('customReadingPassages',JSON.stringify(customPassages));localStorage.setItem('readingProgress',JSON.stringify(progress));$('#totalCount').textContent=passages.length;$('#doneCount').textContent=Object.keys(progress).length;
     if(current.id===articleId)selectPassage(passages[0].id);else renderList();toast('文章已删除')
-  }catch(error){toast(`删除失败：${error.message}`)}
+  }catch(error){deletedArticleIds.delete(articleId);toast(`删除失败：${error.message}`)}
 }
 function renderCloudArticles(){
   const box=$('#cloudArticleList');if(!box)return;if(!customPassages.length){box.innerHTML='<p class="account-intro">还没有自定义文章。</p>';return}
