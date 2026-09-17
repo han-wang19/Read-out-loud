@@ -374,6 +374,7 @@ async function apiRequest(path,options={}){
 }
 function setSyncStatus(message,error=false){const box=$('#syncStatus');box.textContent=message;box.classList.toggle('error',error)}
 function cloudState(){return{articles:customPassages.filter(article=>!deletedArticleIds.has(article.id)),progress}}
+function hasActivePracticeInteraction(){return Boolean(wordMarkMode||answerActive||mediaRecorder?.state==='recording')}
 function mergeCloudState(remote={}){
   const publishedIds=new Map([...submissionStatuses.values()].filter(item=>item.status==='published').map(item=>[item.articleId,item.publicId]));
   const articles=new Map((remote.articles||[]).filter(item=>!publishedIds.has(item.id)&&!deletedArticleIds.has(item.id)).map(item=>[item.id,item]));customPassages.filter(item=>!publishedIds.has(item.id)&&!deletedArticleIds.has(item.id)).forEach(item=>articles.set(item.id,item));
@@ -381,7 +382,13 @@ function mergeCloudState(remote={}){
   for(const article of articles.values())if(!existingIds.has(article.id)){customPassages.push(article);passages.push(article)}
   for(const [id,value] of Object.entries(remote.progress||{})){const targetId=publishedIds.get(id)||id,local=progress[targetId];if(!local||String(value.date||'')>String(local.date||''))progress[targetId]=value;if(targetId!==id)delete progress[id]}
   localStorage.setItem('customReadingPassages',JSON.stringify(customPassages));localStorage.setItem('readingProgress',JSON.stringify(progress));
-  $('#totalCount').textContent=passages.length;$('#doneCount').textContent=Object.keys(progress).length;selectPassage(current.id);renderVocabularyBook();
+  $('#totalCount').textContent=passages.length;$('#doneCount').textContent=Object.keys(progress).length;
+  // Automatic sync can run while the learner is marking words or recording.
+  // Re-selecting the passage here used to discard the in-progress word
+  // selection and, during a recording, trigger the "finish recording first"
+  // guard. Keep the active interface intact until the interaction is done.
+  if(hasActivePracticeInteraction())renderList();else selectPassage(current.id);
+  renderVocabularyBook();
 }
 async function syncCloudData(){
   if(!cloudUser)return;
