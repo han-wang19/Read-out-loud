@@ -57,7 +57,7 @@
         <section class="record-card">
           <div class="record-main">
             <div class="record-options"><button id="prepBtn" class="prepare-record-btn">准备 60 秒后开始</button><button id="recordBtn" class="record-direct-btn"><span></span><b>直接开始录音</b></button></div>
-            <div><b id="recordLabel">点击开始录音（自动识别和评分）</b><p>录音保存在当前浏览器；语音识别可能调用设备或浏览器服务</p></div>
+            <div><b id="recordLabel">点击开始录音（自动识别和评分）</b><p>每篇保留最后一遍朗读录音，登录后自动同步；语音识别可能调用设备或浏览器服务</p></div>
             <div id="recordTime" class="record-time">00:00</div>
           </div>
           <div class="record-phase"><div class="phase"><span id="phaseDot"></span><div><small>当前阶段</small><b id="phaseLabel">自由练习</b></div></div><div class="timer" id="timer">01:00</div></div>
@@ -165,7 +165,7 @@
         <p class="account-intro">使用用户名和密码登录，不需要邮箱或手机号。登录后可在不同设备查看自己的文章和练习记录。</p>
         <label class="form-field"><span>用户名</span><input id="authUsername" autocomplete="username" maxlength="24" placeholder="3–24 位字母或数字"></label>
         <label class="form-field"><span>密码</span><input id="authPassword" type="password" autocomplete="current-password" maxlength="128" placeholder="至少 10 个字符"></label>
-        <p class="privacy-note">目前不收集手机号、邮箱、原始照片或录音。由于没有联系方式，忘记密码后暂时无法自行找回。</p>
+        <p class="privacy-note">目前不收集手机号、邮箱或原始照片；登录后会同步每篇文档的最后一遍朗读录音。由于没有联系方式，忘记密码后暂时无法自行找回。</p>
         <p id="authError" class="form-error" role="alert"></p>
         <div class="modal-actions auth-actions"><button id="registerBtn" class="ghost-btn">注册新账号</button><button id="loginBtn" class="primary-btn">登录</button></div>
       </div>

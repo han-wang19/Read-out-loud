@@ -60,10 +60,10 @@ passages.slice(0,8).flatMap(item=>splitSentences(item.text)).forEach((sentence,i
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 let current = passages[0], filter = 'all', editingPassageId = null, mediaRecorder, chunks = [], recordInterval, recordSeconds = 0, timerInterval, utterance;
-let recognition, recognitionActive = false, recognizedFinal = '', recognizedInterim = '', recognizedArchive = '';
-let recognitionSessionAvailable = false;
+let recognition, recognitionActive = false, recognizedFinal = '';
 const RecognitionEngine = window.SpeechRecognition || window.webkitSpeechRecognition;
 let answerRecorder,answerStream,answerChunks=[],answerRecognition,answerTimerInterval,answerGradeTimeout,answerSeconds=40,answerActive=false,answerFinal='',answerInterim='',answerAudioUrl='',questionIndex=0,questionResults=[];
+let answerFinishing=false;
 let wordMarkMode=null,wordMarkSelection=new Set();
 const savedProgress=readLocalJson('readingProgress',{});
 const progress=savedProgress&&typeof savedProgress==='object'&&!Array.isArray(savedProgress)?savedProgress:{};
@@ -81,6 +81,57 @@ const publicPassageIds = new Set();
 let ocrWorker = null, ocrWorkerPromise = null, ocrAssetsPromise = null, ocrRunId = 0, ocrWorkerGeneration = 0;
 let ocrProgressReporter = () => {};
 
+
+// Audio blobs live in IndexedDB, separately from the small progress JSON.
+let recordingDatabase, playbackUrl='', playbackRequest=0;
+function recordingOwner(){return cloudUser?.id||'guest'}
+function recordingStore(mode,operation){
+  if(!recordingDatabase)recordingDatabase=new Promise((resolve,reject)=>{const request=indexedDB.open('reading-recordings',1);request.onupgradeneeded=()=>request.result.createObjectStore('recordings',{keyPath:'key'});request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});
+  return recordingDatabase.then(db=>new Promise((resolve,reject)=>{const transaction=db.transaction('recordings',mode),request=operation(transaction.objectStore('recordings'));transaction.oncomplete=()=>resolve(request.result);transaction.onerror=()=>reject(transaction.error);transaction.onabort=()=>reject(transaction.error)}));
+}
+function recordingKey(owner,id){return JSON.stringify([owner,id])}
+function showRecording(blob){
+  const audio=$('#audioPlayback');audio.pause();audio.removeAttribute('src');audio.hidden=true;
+  if(playbackUrl)URL.revokeObjectURL(playbackUrl);playbackUrl='';
+  if(blob?.size){playbackUrl=URL.createObjectURL(blob);audio.src=playbackUrl;audio.hidden=false}
+}
+async function restoreRecording(){
+  const request=++playbackRequest,id=current.id,owner=recordingOwner();showRecording(null);
+  const active=()=>request===playbackRequest&&owner===recordingOwner()&&id===current.id;
+  try{
+    let local=await recordingStore('readonly',store=>store.get(recordingKey(owner,id)));
+    if(active()&&local)showRecording(local.blob);
+    if(owner==='guest'||navigator.onLine===false)return;
+    const remote=await apiRequest(`/api/recordings?id=${encodeURIComponent(id)}`);
+    if(owner!==recordingOwner())return;
+    // Re-read: a newer recording may have finished during the download.
+    local=await recordingStore('readonly',store=>store.get(recordingKey(owner,id)));
+    if(remote.recording&&(!local||remote.recording.date>local.date)){
+      const item=remote.recording,blob=new Blob([Uint8Array.from(atob(item.data),char=>char.charCodeAt(0))],{type:item.type});
+      await recordingStore('readwrite',store=>store.put({key:recordingKey(owner,id),owner,id,date:item.date,blob,pending:false}));
+      if(active())showRecording(blob);
+    }
+  }catch(error){if(active())$('#recordLabel').textContent='录音恢复失败，请稍后点击账户中的同步重试';console.error(error)}
+}
+async function saveRecording(id,owner,blob,date){
+  if(!blob.size)return;
+  if(current.id===id&&recordingOwner()===owner){++playbackRequest;showRecording(blob)}
+  try{await recordingStore('readwrite',store=>store.put({key:recordingKey(owner,id),owner,id,date,blob,pending:true}));scheduleCloudSync()}
+  catch(error){toast('录音保存失败，请检查浏览器存储空间');console.error(error)}
+}
+function blobBase64(blob){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(reader.error);reader.readAsDataURL(blob)})}
+async function syncRecordings(){
+  const owner=recordingOwner();if(owner==='guest')return;
+  const items=await recordingStore('readonly',store=>store.getAll());
+  for(const item of items.filter(item=>item.owner===owner&&item.pending)){
+    if(owner!==recordingOwner())return;
+    await apiRequest(`/api/recordings?id=${encodeURIComponent(item.id)}`,{method:'PUT',body:JSON.stringify({date:item.date,type:item.blob.type,data:await blobBase64(item.blob)})});
+    const latest=await recordingStore('readonly',store=>store.get(item.key));
+    if(latest?.date===item.date)await recordingStore('readwrite',store=>store.put({...latest,pending:false}));
+  }
+  if(mediaRecorder?.state!=='recording')await restoreRecording();
+}
+
 function toast(message){const t=$('#toast');t.textContent=message;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1900)}
 function splitSentences(text){return text.match(/[^.!?]+[.!?]+|[^.!?]+$/g)||[text]}
 function displayType(type){return type==='我的文章'?'我的创作':['社区精选','社区拾光'].includes(type)?'社区精选':type}
@@ -97,13 +148,14 @@ function restorePracticeRoute(){const match=location.hash.match(/^#practice\/(.+
 function selectPassage(id){
   if(mediaRecorder?.state==='recording'||answerActive){toast('请先结束当前录音');return}
   stopSpeech(); stopTimer(); closeLearningCard(); wordMarkMode=null;current=passages.find(p=>p.id===id)||passages[0];
-  recognitionActive=false;if(recognition){try{recognition.abort()}catch{}}$('#resultCard').hidden=true;
+  recognitionActive=false;if(recognition){try{recognition.abort()}catch{}}recognition=null;$('#resultCard').hidden=true;
   $('#recordLabel').textContent='点击开始录音（自动识别和评分）';
   $('#sourceBadge').textContent=displayType(current.type); $('#passageTitle').textContent=current.title;
   $('#passageMeta').textContent=`${current.year} · ${current.topic} · ${current.level}`;
   const sentences=splitSentences(current.text); $('#passageText').innerHTML=sentences.map((s,i)=>`<span class="sentence" data-index="${i}">${escapeHtml(s)}</span>`).join('');
   $('#wordCount').textContent=current.text.trim().split(/\s+/).length;
   renderQuestions();
+  restoreRecording();
   $('#favoriteBtn').textContent=favorites.has(id)?'♥':'♡';renderArticleVocabulary();
   const previous=progress[id];
   if(previous?.transcript){renderAssessment(previous.transcript,false);$('#recordLabel').textContent=`已恢复上次练习结果（${new Date(previous.date).toLocaleDateString()}）`}
@@ -374,7 +426,7 @@ async function apiRequest(path,options={}){
 }
 function setSyncStatus(message,error=false){const box=$('#syncStatus');box.textContent=message;box.classList.toggle('error',error)}
 function cloudState(){return{articles:customPassages.filter(article=>!deletedArticleIds.has(article.id)),progress}}
-function hasActivePracticeInteraction(){return Boolean(wordMarkMode||answerActive||mediaRecorder?.state==='recording')}
+function hasActivePracticeInteraction(){return Boolean(wordMarkMode||answerActive||answerFinishing||recognitionActive||mediaRecorder?.state==='recording')}
 function mergeCloudState(remote={}){
   const publishedIds=new Map([...submissionStatuses.values()].filter(item=>item.status==='published').map(item=>[item.articleId,item.publicId]));
   const articles=new Map((remote.articles||[]).filter(item=>!publishedIds.has(item.id)&&!deletedArticleIds.has(item.id)).map(item=>[item.id,item]));customPassages.filter(item=>!publishedIds.has(item.id)&&!deletedArticleIds.has(item.id)).forEach(item=>articles.set(item.id,item));
@@ -457,7 +509,7 @@ async function authenticate(mode){
   catch(problem){error.textContent=problem.message}
 }
 async function logout(){
-  try{await apiRequest('/api/auth/logout',{method:'POST'});}catch{}stopAutomaticSync();cloudUser=null;submissionStatuses.clear();renderAccount();renderList();closeAccountModal();toast('已退出登录；本机缓存仍保留在此设备')
+  try{await apiRequest('/api/auth/logout',{method:'POST'});}catch{}stopAutomaticSync();cloudUser=null;restoreRecording();submissionStatuses.clear();renderAccount();renderList();closeAccountModal();toast('已退出登录；本机缓存仍保留在此设备')
 }
 async function restoreSession(){
   try{const data=await apiRequest('/api/auth/me');cloudUser=data.user;renderAccount();if(cloudUser){startAutomaticSync();await syncCloudData()}}catch{cloudUser=null;stopAutomaticSync();renderAccount()}
@@ -509,18 +561,55 @@ function renderAssessment(transcript,autoSave=true){
   $('#readingScore').textContent=score;$('#correctCount').textContent=counts.correct;$('#wrongCount').textContent=counts.wrong;$('#omittedCount').textContent=counts.omitted;$('#extraCount').textContent=extra;
   $('#recognizedText').textContent=transcript||'没有获得有效识别文本，请检查听写、网络及麦克风权限后重试。';$('#resultCard').hidden=false;$('#recordLabel').textContent='识别完成，成绩已自动保存';if(autoSave)savePracticeProgress({saveReading:true});
 }
+// Each restart gets its own result list. Keep completed segments across sessions.
+function createRecognitionSession(onText,onError){
+  let engine,active=true,archive=[],segment='',retryTimer,stopTimer,resolveStop,failures=0,ended=false;
+  const text=()=>[...archive,segment].filter(Boolean).join(' ').trim();
+  const settle=()=>{clearTimeout(stopTimer);if(resolveStop){const resolve=resolveStop;resolveStop=null;resolve(text())}};
+  function start(){
+    if(!active)return;
+    ended=false;segment='';
+    const instance=engine=new RecognitionEngine();instance.lang='en-US';instance.continuous=true;instance.interimResults=true;instance.maxAlternatives=1;
+    instance.onresult=event=>{if(engine!==instance)return;segment=Array.from(event.results,result=>result[0].transcript.trim()).filter(Boolean).join(' ');failures=0;onText(text())};
+    instance.onerror=event=>{
+      if(engine!==instance)return;
+      if(['not-allowed','service-not-allowed','audio-capture','language-not-supported'].includes(event.error))active=false;
+      if(event.error!=='aborted')onError(event.error);
+    };
+    instance.onend=()=>{
+      if(engine!==instance)return;
+      ended=true;if(segment)archive.push(segment);segment='';
+      if(active&&++failures<=5)retryTimer=setTimeout(start,Math.min(250*2**(failures-1),4000));
+      else{active=false;settle()}
+    };
+    try{instance.start()}catch(error){instance.onerror({error:error.name==='NotAllowedError'?'not-allowed':'network'});instance.onend()}
+  }
+  start();
+  return {
+    stop(){active=false;clearTimeout(retryTimer);return new Promise(resolve=>{resolveStop=resolve;if(ended){settle();return}stopTimer=setTimeout(()=>{const previous=engine;engine=null;try{previous.abort()}catch{}settle()},4000);try{engine.stop()}catch{settle()}})},
+    abort(){active=false;clearTimeout(retryTimer);const previous=engine;engine=null;try{previous?.abort()}catch{}settle()},
+  };
+}
+function recognitionErrorMessage(error){
+  return ({'not-allowed':'语音识别权限未开启，请检查浏览器麦克风及系统听写权限','service-not-allowed':'当前浏览器不允许语音识别，请尝试直接用 Safari 或 Chrome 打开网页','audio-capture':'语音识别无法使用麦克风，请检查是否被其他应用占用','network':'语音识别网络连接中断，正在尝试恢复','no-speech':'暂未检测到声音，请靠近麦克风继续朗读','language-not-supported':'当前设备不支持英语语音识别'})[error]||`语音识别暂不可用（${error}）`;
+}
 function startRecognition(){
-  recognizedFinal='';recognizedInterim='';recognizedArchive='';recognitionSessionAvailable=false;$('#resultCard').hidden=false;$('#recognizedText').textContent='正在识别朗读内容……';$('#readingScore').textContent='…';['correctCount','wrongCount','omittedCount','extraCount'].forEach(id=>$(`#${id}`).textContent='—');
+  recognition?.abort();recognizedFinal='';$('#resultCard').hidden=false;$('#recognizedText').textContent='正在连接语音识别，请稍候开始朗读……';$('#readingScore').textContent='…';['correctCount','wrongCount','omittedCount','extraCount'].forEach(id=>$(`#${id}`).textContent='—');
   const sentences=splitSentences(current.text);$('#passageText').innerHTML=sentences.map((s,i)=>`<span class="sentence" data-index="${i}">${escapeHtml(s)}</span>`).join('');
   if(!RecognitionEngine){$('#recognizedText').textContent='当前浏览器不支持自动语音识别。录音仍会正常保存，但不能自动批改。';return false}
-  try{recognition=new RecognitionEngine();recognition.lang='en-US';recognition.continuous=true;recognition.interimResults=true;recognition.maxAlternatives=1;
-    recognition.onresult=e=>{let final='',interim='';for(let i=0;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)final+=t+' ';else interim+=t+' '}recognizedFinal=final.trim();recognizedInterim=interim.trim();$('#recognizedText').textContent=(recognizedFinal+' '+recognizedInterim).trim()||'正在聆听……'};
-    recognition.onerror=e=>{if(!['aborted','no-speech'].includes(e.error)){recognitionSessionAvailable=false;$('#recognizedText').textContent=`识别暂不可用（${e.error}）。录音仍可正常回放。`}};
-    recognition.onend=()=>{if(recognitionActive&&mediaRecorder?.state==='recording'){recognizedArchive+=(recognizedFinal+' ');recognizedFinal='';recognizedInterim='';try{recognition.start()}catch{}}};
-    recognitionActive=true;recognition.start();recognitionSessionAvailable=true;return true
-  }catch(e){recognitionActive=false;$('#recognizedText').textContent='无法启动语音识别。请使用Safari或Chrome，并确认已开启听写功能。';return false}
+  recognitionActive=true;
+  recognition=createRecognitionSession(text=>{recognizedFinal=text;$('#recognizedText').textContent=text||'正在聆听……'},error=>{$('#recognizedText').textContent=[recognizedFinal,recognitionErrorMessage(error)+'；录音仍会保存。'].filter(Boolean).join('\n')});
+  return true;
 }
-function finishRecognition(){recognitionActive=false;if(recognition){try{recognition.stop()}catch{}}if(!recognitionSessionAvailable){$('#recordLabel').textContent='录音完成，可回放；当前设备未能自动识别';return}setTimeout(()=>renderAssessment((recognizedArchive+' '+recognizedFinal+' '+recognizedInterim).trim()),700)}
+async function finishRecognition(){
+  const session=recognition,id=current.id;
+  const transcript=session?await session.stop():'';
+  if(session!==recognition||current.id!==id)return;
+  recognitionActive=false;
+  if(transcript.trim()){renderAssessment(transcript);return}
+  $('#readingScore').textContent='—';$('#recordLabel').textContent='录音已保存，未获得识别结果，本次不评分';
+  if(RecognitionEngine)$('#recognizedText').textContent='未获得有效识别文本，本次不会覆盖上次成绩。请检查网络、麦克风和系统听写权限后重新录音。';
+}
 
 function answerStem(word){return word.toLowerCase().replace(/[^a-z]/g,'').replace(/ies$/,'y').replace(/(ing|ed|es)$/,'').replace(/s$/,'')}
 const answerStopWords=new Set('a an the is are was were be been being do does did can could may might must should would will to of in on at for from with by and or but that which who what when where why how it its they them their this these those person people students visitors one two also after before during into over more much many'.split(' ').map(answerStem));
@@ -547,6 +636,7 @@ function showActiveQuestion(){
   playActiveQuestion();
 }
 async function startAnswerRecording(){
+  if(answerFinishing)return;
   if(answerActive){finishAnswerRecording();return}
   if(mediaRecorder?.state==='recording'){toast('请先完成短文朗读录音');return}
   if(!navigator.mediaDevices?.getUserMedia){toast('当前浏览器不支持录音');return}
@@ -556,40 +646,46 @@ async function startAnswerRecording(){
     answerRecorder.onstop=()=>{if(answerAudioUrl)URL.revokeObjectURL(answerAudioUrl);answerAudioUrl=URL.createObjectURL(new Blob(answerChunks,{type:answerRecorder.mimeType}));$('#answerPlayback').src=answerAudioUrl;$('#answerPlayback').hidden=false;answerStream?.getTracks().forEach(track=>track.stop())};
     answerFinal='';answerInterim='';
     if(RecognitionEngine){
-      answerRecognition=new RecognitionEngine();answerRecognition.lang='en-US';answerRecognition.continuous=true;answerRecognition.interimResults=true;
-      answerRecognition.onresult=event=>{let final='',interim='';for(let i=0;i<event.results.length;i++){const text=event.results[i][0].transcript;if(event.results[i].isFinal)final+=`${text} `;else interim+=`${text} `}answerFinal=final.trim();answerInterim=interim.trim();$('#answerLiveText').textContent=(answerFinal+' '+answerInterim).trim()||'正在聆听……'};
-      answerRecognition.onerror=event=>{if(!['aborted','no-speech'].includes(event.error))$('#answerLiveText').textContent=`语音识别暂不可用（${event.error}），录音仍会保留。`};
-      try{answerRecognition.start()}catch{}
+      answerRecognition?.abort();
+      answerRecognition=createRecognitionSession(text=>{answerFinal=text;answerInterim='';$('#answerLiveText').textContent=text||'正在聆听……'},error=>{$('#answerLiveText').textContent=[answerFinal,recognitionErrorMessage(error)+'；录音仍会保留。'].filter(Boolean).join('\n')});
     }else $('#answerLiveText').textContent='当前浏览器不支持语音识别，录音可以回放，但无法自动评分。';
     answerRecorder.start();answerActive=true;answerSeconds=40;$('#answerRecordBtn').textContent='结束回答并评分';
     clearInterval(answerTimerInterval);answerTimerInterval=setInterval(()=>{answerSeconds--;$('#questionTimer').textContent=`00:${String(Math.max(0,answerSeconds)).padStart(2,'0')}`;if(answerSeconds<=0)finishAnswerRecording()},1000);
   }catch{toast('无法使用麦克风，请检查浏览器权限')}
 }
-function finishAnswerRecording(){
+async function finishAnswerRecording(){
   if(!answerActive)return;answerActive=false;clearInterval(answerTimerInterval);answerTimerInterval=null;$('#answerRecordBtn').disabled=true;$('#answerRecordBtn').textContent='正在评分…';
-  if(answerRecorder?.state==='recording')answerRecorder.stop();if(answerRecognition){try{answerRecognition.stop()}catch{}}
-  answerGradeTimeout=setTimeout(()=>{
+  answerFinishing=true;
+  const session=answerRecognition,id=current.id,index=questionIndex;
+  if(answerRecorder?.state==='recording')answerRecorder.stop();
+  if(session)await session.stop();
+  if(session!==answerRecognition||id!==current.id||index!==questionIndex)return;
+  answerFinishing=false;
+  if(!answerFinal.trim()){
+    $('#answerLiveText').textContent='未获得有效识别文本，本次不评分。请检查网络、麦克风及听写权限后重新回答。';
+    $('#answerRecordBtn').disabled=false;$('#answerRecordBtn').textContent='重新回答';return;
+  }
     const transcript=(answerFinal+' '+answerInterim).trim(),reference=current.answers?.[questionIndex]||'',result=gradeAnswer(transcript,reference);questionResults[questionIndex]={question:current.questions[questionIndex],transcript,points:result.points,coverage:result.coverage};
     $('#answerLiveText').textContent=transcript||'没有获得有效识别文本。';
     const feedback=$('#answerFeedback');feedback.hidden=false;feedback.innerHTML=`<b>本题练习得分：${result.points} / 2</b><p>参考答案：${escapeHtml(reference)}</p><small>识别到 ${result.matched.length} / ${result.expected.length} 个参考答案要点。本评分仅供练习。</small>`;
     $('#questionTotalScore').textContent=`${questionResults.reduce((sum,item)=>sum+(item?.points||0),0)} / ${current.questions.length*2} 分`;$('#answerRecordBtn').hidden=true;
     const next=$('#nextQuestionBtn');next.hidden=false;next.textContent=questionIndex<current.questions.length-1?'下一题 →':'完成并保存成绩';
-  },700);
 }
 function nextQuestion(){
   if(questionIndex<current.questions.length-1){questionIndex++;showActiveQuestion();return}
   const total=questionResults.reduce((sum,item)=>sum+(item?.points||0),0);$('#nextQuestionBtn').hidden=true;$('#answerFeedback').innerHTML+=`<p class="question-summary">回答问题完成：${total} / ${current.questions.length*2} 分，成绩已自动保存。</p>`;savePracticeProgress({saveQuestions:true});toast(`回答问题完成：${total} / ${current.questions.length*2} 分，已保存`);
 }
 function stopAnswerPractice(){
+  answerFinishing=false;
   clearInterval(answerTimerInterval);clearTimeout(answerGradeTimeout);answerTimerInterval=null;answerGradeTimeout=null;answerActive=false;
-  if(answerRecorder?.state==='recording'){try{answerRecorder.stop()}catch{}}if(answerRecognition){try{answerRecognition.abort()}catch{}}answerStream?.getTracks().forEach(track=>track.stop());
+  if(answerRecorder?.state==='recording'){try{answerRecorder.stop()}catch{}}if(answerRecognition){try{answerRecognition.abort()}catch{}}answerRecognition=null;answerStream?.getTracks().forEach(track=>track.stop());
 }
 
 async function toggleRecord(){
   if(mediaRecorder?.state==='recording'){stopRecording();return}
-  if(answerActive){toast('请先完成当前问题作答');return}
+  if(answerActive||answerFinishing){toast('请先完成当前问题作答');return}
   if(!navigator.mediaDevices?.getUserMedia){toast('当前浏览器不支持录音');return}
-  try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks=[];mediaRecorder=new MediaRecorder(stream);mediaRecorder.ondataavailable=e=>chunks.push(e.data);mediaRecorder.onstop=()=>{const url=URL.createObjectURL(new Blob(chunks,{type:mediaRecorder.mimeType}));$('#audioPlayback').src=url;$('#audioPlayback').hidden=false;stream.getTracks().forEach(t=>t.stop())};mediaRecorder.start();startRecognition();recordSeconds=0;$('#recordTime').textContent='00:00';$('#recordBtn').classList.add('recording');$('#recordLabel').textContent='正在录音并识别，90秒后自动停止';startTimer(90,'朗读时间',true);recordInterval=setInterval(()=>{recordSeconds++;$('#recordTime').textContent=`${String(Math.floor(recordSeconds/60)).padStart(2,'0')}:${String(recordSeconds%60).padStart(2,'0')}`},1000)}catch(e){toast('无法使用麦克风，请检查浏览器权限')}
+  try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks=[];mediaRecorder=new MediaRecorder(stream);mediaRecorder.ondataavailable=e=>recordedChunks.push(e.data);const recordedId=current.id,recordedOwner=recordingOwner(),recorder=mediaRecorder,recordedChunks=chunks;mediaRecorder.onstop=()=>{const blob=new Blob(recordedChunks,{type:recorder.mimeType});stream.getTracks().forEach(t=>t.stop());saveRecording(recordedId,recordedOwner,blob,new Date().toISOString())};mediaRecorder.start();startRecognition();recordSeconds=0;$('#recordTime').textContent='00:00';$('#recordBtn').classList.add('recording');$('#recordLabel').textContent='正在录音并识别，90秒后自动停止';startTimer(90,'朗读时间',true);recordInterval=setInterval(()=>{recordSeconds++;$('#recordTime').textContent=`${String(Math.floor(recordSeconds/60)).padStart(2,'0')}:${String(recordSeconds%60).padStart(2,'0')}`},1000)}catch(e){toast('无法使用麦克风，请检查浏览器权限')}
 }
 function stopRecording(fromTimer=false){if(mediaRecorder?.state==='recording')mediaRecorder.stop();finishRecognition();clearInterval(recordInterval);if(!fromTimer)stopTimer();$('#recordBtn').classList.remove('recording');$('#recordLabel').textContent=fromTimer?'90秒结束，正在生成识别报告':'录音完成，正在生成识别报告'}
 function savePracticeProgress({saveReading=false,saveQuestions=false,notify=false}={}){
