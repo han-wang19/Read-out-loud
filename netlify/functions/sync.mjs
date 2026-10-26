@@ -1,6 +1,6 @@
 import { getStore } from '@netlify/blobs'
 import { checkOrigin, handleError, json, requireUser } from '../lib/auth.mjs'
-import { sanitizeState } from '../lib/data.mjs'
+import { mergeVocabularyReview, sanitizeState } from '../lib/data.mjs'
 
 export default async request => {
   try {
@@ -10,6 +10,10 @@ export default async request => {
       checkOrigin(request)
       if (Number(request.headers.get('content-length') || 0) > 1_000_000) return json({ error: '同步数据过大' }, 413)
       const state = sanitizeState(await request.json())
+      const previous = await store.get(user.id, { type: 'json' })
+      // Keep newer per-word answers, including when an older client sends no
+      // vocabulary field. A stale device must not undo a completed review.
+      state.vocabularyReview = mergeVocabularyReview(previous?.vocabularyReview, state.vocabularyReview)
       await store.setJSON(user.id, state)
       return json({ state })
     }

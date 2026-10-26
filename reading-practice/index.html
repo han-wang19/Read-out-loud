@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css?v=12">
   <link rel="stylesheet" href="assessment.css?v=12">
-  <link rel="stylesheet" href="practice-enhancements.css?v=13">
+  <link rel="stylesheet" href="practice-enhancements.css?v=14">
 </head>
 <body>
   <header class="topbar">
@@ -130,8 +130,15 @@
       <button id="vocabBookClose" class="learning-card-close" aria-label="关闭">×</button>
       <span class="eyebrow">MY VOCABULARY BOOK</span>
       <h2 id="vocabBookTitle">我的生词本</h2>
-      <p class="account-intro">汇总练过的所有文章。点击任意单词即可听发音。</p>
-      <div class="vocabulary-book-grid"><section><h3>不会读的</h3><div id="bookPronunciationWords" class="vocabulary-word-list"></div></section><section><h3>不认识的</h3><div id="bookMeaningWords" class="vocabulary-word-list"></div></section></div>
+      <p class="account-intro">汇总所有文章中标记的“不会读”和“不认识”的单词。先看英文回想词义，再点击单词听发音、看汉译。</p>
+      <div class="vocabulary-study-tabs" role="group" aria-label="学习阶段">
+        <button type="button" data-review-stage="new" aria-pressed="true">新学 <span id="vocabularyNewCount">0</span></button>
+        <button type="button" data-review-stage="review" aria-pressed="false">复习 <span id="vocabularyReviewCount">0</span></button>
+        <button type="button" data-review-stage="mastered" aria-pressed="false">已掌握 <span id="vocabularyMasteredCount">0</span></button>
+      </div>
+      <p id="vocabularyStudyHint" class="vocabulary-help"></p>
+      <p id="vocabularyStudyStatus" class="vocabulary-study-status" role="status"></p>
+      <ul id="vocabularyStudyList" class="vocabulary-study-list" aria-label="新学单词"></ul>
     </section>
   </div>
 
@@ -201,6 +208,7 @@
   <script src="local-dictionary.js"></script>
   <script src="local-translations.js"></script>
   <script src="vocabulary-passages.js?v=1"></script>
-  <script src="app.js?v=13"></script>
+  <script src="vocabulary-review.js?v=1"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>

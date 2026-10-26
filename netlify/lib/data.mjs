@@ -21,6 +21,28 @@ export function sanitizeArticle(article) {
   }
 }
 
+export function sanitizeVocabularyReview(input) {
+  const result = {}
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return result
+  for (const [word, value] of Object.entries(input).slice(0, 10000)) {
+    if (!/^[a-z0-9]{1,80}$/.test(word) || !value || typeof value !== 'object') continue
+    if (!['new', 'review', 'mastered'].includes(value.stage)) continue
+    const time = Date.parse(value.updatedAt)
+    if (!Number.isFinite(time)) continue
+    const streak = Math.max(0, Math.min(3, Math.floor(Number(value.streak) || 0)))
+    result[word] = { stage: value.stage, streak: value.stage === 'mastered' ? 3 : value.stage === 'new' ? 0 : Math.min(2, streak), updatedAt: new Date(time).toISOString() }
+  }
+  return result
+}
+
+export function mergeVocabularyReview(local, remote) {
+  const merged = sanitizeVocabularyReview(local)
+  for (const [word, value] of Object.entries(sanitizeVocabularyReview(remote))) {
+    if (!Object.hasOwn(merged, word) || value.updatedAt > merged[word].updatedAt) merged[word] = value
+  }
+  return merged
+}
+
 export function sanitizeState(input) {
   const articles = Array.isArray(input?.articles) ? input.articles.map(sanitizeArticle).filter(Boolean).slice(0, 100) : []
   const progress = {}
@@ -48,5 +70,5 @@ export function sanitizeState(input) {
       unknownWords: Array.isArray(value.unknownWords) ? [...new Set(value.unknownWords.map(word => String(word || '').toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean))].slice(0, 300) : [],
     }
   }
-  return { articles, progress, updatedAt: new Date().toISOString() }
+  return { articles, progress, vocabularyReview: sanitizeVocabularyReview(input?.vocabularyReview), updatedAt: new Date().toISOString() }
 }

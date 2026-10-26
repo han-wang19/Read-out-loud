@@ -69,6 +69,8 @@ let answerFinishing=false;
 let wordMarkMode=null,wordMarkSelection=new Set();
 const savedProgress=readLocalJson('readingProgress',{});
 const progress=savedProgress&&typeof savedProgress==='object'&&!Array.isArray(savedProgress)?savedProgress:{};
+let vocabularyReview=window.VocabularyReview.clean(readLocalJson('readingVocabularyReview',{}));
+let vocabularyStudyStage='new',vocabularyReveal=null,vocabularyRevealRequest=0;
 const savedFavorites=readLocalJson('readingFavorites',[]);
 const favorites=new Set(Array.isArray(savedFavorites)?savedFavorites:[]);
 const lookupCache = new Map(), translationCache = new Map();
@@ -242,10 +244,49 @@ function finishWordMark(){
   if(!wordMarkMode)return;const previous=progress[current.id]||{},key=wordMarkMode==='pronunciation'?'unpronounceableWords':'unknownWords';progress[current.id]={...previous,date:new Date().toISOString(),[key]:[...wordMarkSelection].sort()};localStorage.setItem('readingProgress',JSON.stringify(progress));wordMarkMode=null;$('#doneCount').textContent=Object.keys(progress).length;scheduleCloudSync();selectPassage(current.id);renderVocabularyBook();toast(cloudUser?'生词记录已保存并等待同步':'生词记录已保存在本机')
 }
 function renderVocabularyBook(){
-  const pronunciation=new Set(),meaning=new Set();Object.values(progress).forEach(item=>{(item.unpronounceableWords||[]).forEach(word=>pronunciation.add(word));(item.unknownWords||[]).forEach(word=>meaning.add(word))});$('#bookPronunciationWords').innerHTML=vocabularyRows([...pronunciation].sort(),'pronunciation','还没有“不会读”的单词');$('#bookMeaningWords').innerHTML=vocabularyRows([...meaning].sort(),'meaning','还没有“不认识”的单词')
+  const words=new Set(Object.keys(vocabularyReview));
+  Object.values(progress).forEach(item=>{[...(item.unpronounceableWords||[]),...(item.unknownWords||[])].forEach(word=>{const key=normalizeWord(word);if(key)words.add(key)})});
+  const lists={new:[],review:[],mastered:[]};
+  [...words].sort().forEach(word=>lists[window.VocabularyReview.record(vocabularyReview,word).stage].push(word));
+  const labels={new:'新学',review:'复习',mastered:'已掌握'};
+  for(const [stage,id] of Object.entries({new:'New',review:'Review',mastered:'Mastered'}))$('#vocabulary'+id+'Count').textContent=lists[stage].length;
+  $$('[data-review-stage]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.reviewStage===vocabularyStudyStage)));
+  $('#vocabularyStudyHint').textContent={new:'选择“记得”后移入复习；选择“不记得”则留在新学。',review:'每次先回想，再点击查看。连续3次选择“记得”后移入已掌握；“不记得”会将连续次数清零，留在复习。',mastered:'这里的单词已连续复习答对3次。点击单词仍可听发音、查看汉译。'}[vocabularyStudyStage];
+  if(vocabularyReveal){const record=window.VocabularyReview.record(vocabularyReview,vocabularyReveal.word);if(!lists[vocabularyStudyStage].includes(vocabularyReveal.word)||record.updatedAt!==vocabularyReveal.updatedAt)vocabularyReveal=null}
+  const list=$('#vocabularyStudyList');list.setAttribute('aria-label',labels[vocabularyStudyStage]+'单词');
+  list.innerHTML=lists[vocabularyStudyStage].map(word=>{
+    const reveal=vocabularyReveal?.word===word?vocabularyReveal:null,record=window.VocabularyReview.record(vocabularyReview,word);
+    return `<li><button type="button" class="vocabulary-study-word" data-review-word="${escapeHtml(word)}" aria-expanded="${Boolean(reveal)}">${escapeHtml(word)}</button>${reveal?`<div class="vocabulary-study-answer"><p class="vocabulary-study-meaning" aria-live="polite">${escapeHtml(reveal.meaning)}</p>${vocabularyStudyStage==='review'?`<p class="vocabulary-help">连续记得 ${record.streak} / 3 次</p>`:''}${vocabularyStudyStage!=='mastered'?`<div class="vocabulary-study-actions"><button type="button" data-review-answer="remembered" ${reveal.ready?'':'disabled'}>记得</button><button type="button" data-review-answer="forgotten" ${reveal.ready?'':'disabled'}>不记得</button></div>`:''}</div>`:''}</li>`;
+  }).join('')||`<li class="vocabulary-study-empty">${{new:'暂无新学单词。可在文章中标记“不会读”或“不认识”的单词。',review:'暂无复习单词。在新学列表选择“记得”后，单词会来到这里。',mastered:'暂无已掌握单词。复习列表中的单词连续答对3次后会来到这里。'}[vocabularyStudyStage]}</li>`;
 }
-function openVocabularyBook(){closeLearningCard();renderVocabularyBook();$('#vocabBookModal').hidden=false}
-function closeVocabularyBook(){$('#vocabBookModal').hidden=true}
+function switchVocabularyStage(stage){if(!['new','review','mastered'].includes(stage))return;vocabularyStudyStage=stage;vocabularyReveal=null;++vocabularyRevealRequest;$('#vocabularyStudyStatus').textContent='';renderVocabularyBook()}
+async function revealVocabularyWord(word){
+  const request=++vocabularyRevealRequest,record=window.VocabularyReview.record(vocabularyReview,word);
+  if(record.stage!==vocabularyStudyStage)return;
+  const local=getLocalWordDetails(word),meaning=local?.chinese;
+  const ready=Boolean(meaning&&/[\u4e00-\u9fff]/.test(meaning)&&!meaning.includes('暂无'));
+  const reveal={word,updatedAt:record.updatedAt,meaning:ready?meaning:'正在查询汉译…',ready};
+  vocabularyReveal=reveal;$('#vocabularyStudyStatus').textContent='';renderVocabularyBook();speakWord(word);
+  if(ready)return;
+  try{
+    const details=await getWordDetails(word);
+    if(request!==vocabularyRevealRequest||vocabularyReveal!==reveal||$('#vocabBookModal').hidden)return;
+    reveal.ready=Boolean(details.chinese&&/[\u4e00-\u9fff]/.test(details.chinese)&&!details.chinese.includes('无法')&&!details.chinese.includes('暂无'));
+    reveal.meaning=reveal.ready?details.chinese:'未能获取汉译，请再次点击单词重试。';renderVocabularyBook();
+  }catch{if(request===vocabularyRevealRequest&&vocabularyReveal===reveal){reveal.meaning='未能获取汉译，请再次点击单词重试。';renderVocabularyBook()}}
+}
+function answerVocabularyReview(remembered){
+  const reveal=vocabularyReveal;if(!reveal?.ready||vocabularyStudyStage==='mastered')return;
+  const previous=window.VocabularyReview.record(vocabularyReview,reveal.word);
+  if(previous.updatedAt!==reveal.updatedAt||previous.stage!==vocabularyStudyStage){vocabularyReveal=null;renderVocabularyBook();return}
+  const next=window.VocabularyReview.answer(previous,remembered);
+  const updated={...vocabularyReview,[reveal.word]:next};
+  try{localStorage.setItem('readingVocabularyReview',JSON.stringify(updated))}catch{toast('学习进度保存失败，请检查浏览器存储空间后重试');return}
+  vocabularyReview=updated;vocabularyReveal=null;++vocabularyRevealRequest;renderVocabularyBook();scheduleCloudSync();
+  $('#vocabularyStudyStatus').textContent=next.stage==='mastered'?`${reveal.word} 已移入已掌握。`:previous.stage==='new'&&remembered?`${reveal.word} 已移入复习。`:remembered?`${reveal.word} 连续记得 ${next.streak} / 3 次。`:`${reveal.word} ${previous.stage==='new'?'仍在新学列表':'连续次数已清零，留在复习列表'}。`;
+}
+function openVocabularyBook(){closeLearningCard();vocabularyReveal=null;++vocabularyRevealRequest;$('#vocabularyStudyStatus').textContent='';renderVocabularyBook();$('#vocabBookModal').hidden=false}
+function closeVocabularyBook(){vocabularyReveal=null;++vocabularyRevealRequest;$('#vocabBookModal').hidden=true}
 function positionLearningCard(rect){
   const card=$('#learningCard');card.hidden=false;
   const width=Math.min(390,window.innerWidth-24),gap=10;
@@ -443,14 +484,16 @@ async function apiRequest(path,options={}){
   return data;
 }
 function setSyncStatus(message,error=false){const box=$('#syncStatus');box.textContent=message;box.classList.toggle('error',error)}
-function cloudState(){return{articles:customPassages.filter(article=>!deletedArticleIds.has(article.id)),progress}}
-function hasActivePracticeInteraction(){return Boolean(wordMarkMode||answerActive||answerFinishing||recognitionActive||mediaRecorder?.state==='recording'||['#audioPlayback','#answerPlayback'].some(selector=>{const audio=$(selector);return audio&&!audio.paused&&!audio.ended}))}
+function cloudState(){return{articles:customPassages.filter(article=>!deletedArticleIds.has(article.id)),progress,vocabularyReview}}
+function hasActivePracticeInteraction(){return Boolean(wordMarkMode||answerActive||answerFinishing||recognitionActive||mediaRecorder?.state==='recording'||$('#vocabBookModal')?.hidden===false||['#audioPlayback','#answerPlayback'].some(selector=>{const audio=$(selector);return audio&&!audio.paused&&!audio.ended}))}
 function mergeCloudState(remote={}){
   const publishedIds=new Map([...submissionStatuses.values()].filter(item=>item.status==='published').map(item=>[item.articleId,item.publicId]));
   const articles=new Map((remote.articles||[]).filter(item=>!publishedIds.has(item.id)&&!deletedArticleIds.has(item.id)).map(item=>[item.id,item]));customPassages.filter(item=>!publishedIds.has(item.id)&&!deletedArticleIds.has(item.id)).forEach(item=>articles.set(item.id,item));
   const existingIds=new Set(customPassages.map(item=>item.id));
   for(const article of articles.values())if(!existingIds.has(article.id)){customPassages.push(article);passages.push(article)}
   for(const [id,value] of Object.entries(remote.progress||{})){const targetId=publishedIds.get(id)||id,local=progress[targetId];if(!local||String(value.date||'')>String(local.date||''))progress[targetId]=value;if(targetId!==id)delete progress[id]}
+  vocabularyReview=window.VocabularyReview.merge(vocabularyReview,remote.vocabularyReview);
+  localStorage.setItem('readingVocabularyReview',JSON.stringify(vocabularyReview));
   localStorage.setItem('customReadingPassages',JSON.stringify(customPassages));localStorage.setItem('readingProgress',JSON.stringify(progress));
   $('#totalCount').textContent=passages.length;$('#doneCount').textContent=Object.keys(progress).length;
   // Automatic sync can run while the learner is marking words or recording.
@@ -726,7 +769,12 @@ window.addEventListener('pagehide',()=>{if(ocrWorker)ocrWorker.terminate().catch
 $('#passageList').addEventListener('click',event=>{const edit=event.target.closest('[data-edit]'),remove=event.target.closest('[data-delete]'),submit=event.target.closest('[data-submit]');if(edit){editCustomArticle(edit.dataset.edit);return}if(remove){deleteCustomArticle(remove.dataset.delete);return}if(submit){submitArticle(submit.dataset.submit,submit);return}const card=event.target.closest('.passage-item');if(!card)return;event.preventDefault();openPassage(card.dataset.id)});
 $('#passageText').addEventListener('click',e=>{const marked=e.target.closest('[data-mark-word]');if(marked&&wordMarkMode){toggleMarkedWord(marked);return}const word=e.target.closest('.word');if(word)showWordCard(word.textContent,word.getBoundingClientRect())});
 $('#passageText').addEventListener('keydown',e=>{if(!['Enter',' '].includes(e.key))return;const marked=e.target.closest('[data-mark-word]');if(marked&&wordMarkMode){e.preventDefault();toggleMarkedWord(marked);return}if(e.target.matches('.word')){e.preventDefault();showWordCard(e.target.textContent,e.target.getBoundingClientRect())}});
-document.addEventListener('click',event=>{const word=event.target.closest('[data-vocab-word]');if(word)speakWord(word.dataset.vocabWord)});
+document.addEventListener('click',event=>{
+  const stage=event.target.closest('[data-review-stage]');if(stage){switchVocabularyStage(stage.dataset.reviewStage);return}
+  const review=event.target.closest('[data-review-word]');if(review){revealVocabularyWord(review.dataset.reviewWord);return}
+  const answer=event.target.closest('[data-review-answer]');if(answer){answerVocabularyReview(answer.dataset.reviewAnswer==='remembered');return}
+  const word=event.target.closest('[data-vocab-word]');if(word)speakWord(word.dataset.vocabWord)
+});
 window.addEventListener('online',()=>{if(cloudUser)syncCloudData()});window.addEventListener('focus',()=>{if(cloudUser)syncCloudData()});document.addEventListener('visibilitychange',()=>{if(cloudUser&&!document.hidden)syncCloudData()});
 $('#passageText').addEventListener('mouseup',handleTextSelection);$('#passageText').addEventListener('touchend',handleTextSelection);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeLearningCard();closeCustomModal();closeAccountModal();closeVocabularyBook();$('#adminModal').hidden=true}});
