@@ -49,6 +49,8 @@ const passages = [
   }
 ];
 
+passages.push(...(window.VOCABULARY_PASSAGES||[]));
+
 function readLocalJson(key,fallback){try{return JSON.parse(localStorage.getItem(key)||JSON.stringify(fallback))}catch{return fallback}}
 let customPassages=readLocalJson('customReadingPassages',[]);
 customPassages=Array.isArray(customPassages)?customPassages.filter(item=>item?.id&&item?.text):[];
@@ -83,16 +85,23 @@ let ocrProgressReporter = () => {};
 
 
 // Audio blobs live in IndexedDB, separately from the small progress JSON.
-let recordingDatabase, playbackUrl='', playbackRequest=0;
+let recordingDatabase, playbackUrl='', playbackRequest=0, playbackKey='', playbackDate='';
 function recordingOwner(){return cloudUser?.id||'guest'}
 function recordingStore(mode,operation){
   if(!recordingDatabase)recordingDatabase=new Promise((resolve,reject)=>{const request=indexedDB.open('reading-recordings',1);request.onupgradeneeded=()=>request.result.createObjectStore('recordings',{keyPath:'key'});request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});
   return recordingDatabase.then(db=>new Promise((resolve,reject)=>{const transaction=db.transaction('recordings',mode),request=operation(transaction.objectStore('recordings'));transaction.oncomplete=()=>resolve(request.result);transaction.onerror=()=>reject(transaction.error);transaction.onabort=()=>reject(transaction.error)}));
 }
 function recordingKey(owner,id){return JSON.stringify([owner,id])}
-function showRecording(blob){
-  const audio=$('#audioPlayback');audio.pause();audio.removeAttribute('src');audio.hidden=true;
+function showRecording(blob,date='',key=recordingKey(recordingOwner(),current.id)){
+  const audio=$('#audioPlayback');
+  // Background refreshes must not reload the same recording or interrupt a
+  // recording already playing. A newer remote version can wait until paused.
+  if(key===playbackKey&&playbackUrl){
+    if(!blob||date===playbackDate||(!audio.paused&&!audio.ended))return;
+  }
+  audio.pause();audio.removeAttribute('src');audio.hidden=true;
   if(playbackUrl)URL.revokeObjectURL(playbackUrl);playbackUrl='';
+  playbackKey=key;playbackDate=date;
   if(blob?.size){playbackUrl=URL.createObjectURL(blob);audio.src=playbackUrl;audio.hidden=false}
 }
 async function restoreRecording(){
@@ -100,7 +109,7 @@ async function restoreRecording(){
   const active=()=>request===playbackRequest&&owner===recordingOwner()&&id===current.id;
   try{
     let local=await recordingStore('readonly',store=>store.get(recordingKey(owner,id)));
-    if(active()&&local)showRecording(local.blob);
+    if(active()&&local)showRecording(local.blob,local.date);
     if(owner==='guest'||navigator.onLine===false)return;
     const remote=await apiRequest(`/api/recordings?id=${encodeURIComponent(id)}`);
     if(owner!==recordingOwner())return;
@@ -109,13 +118,13 @@ async function restoreRecording(){
     if(remote.recording&&(!local||remote.recording.date>local.date)){
       const item=remote.recording,blob=new Blob([Uint8Array.from(atob(item.data),char=>char.charCodeAt(0))],{type:item.type});
       await recordingStore('readwrite',store=>store.put({key:recordingKey(owner,id),owner,id,date:item.date,blob,pending:false}));
-      if(active())showRecording(blob);
+      if(active())showRecording(blob,item.date);
     }
   }catch(error){if(active())$('#recordLabel').textContent='录音恢复失败，请稍后点击账户中的同步重试';console.error(error)}
 }
 async function saveRecording(id,owner,blob,date){
   if(!blob.size)return;
-  if(current.id===id&&recordingOwner()===owner){++playbackRequest;showRecording(blob)}
+  if(current.id===id&&recordingOwner()===owner){++playbackRequest;showRecording(blob,date)}
   try{await recordingStore('readwrite',store=>store.put({key:recordingKey(owner,id),owner,id,date,blob,pending:true}));scheduleCloudSync()}
   catch(error){toast('录音保存失败，请检查浏览器存储空间');console.error(error)}
 }
@@ -139,7 +148,9 @@ function matchesFilter(passage){if(filter==='all')return true;if(filter==='mine'
 function scoreSummary(id){const saved=progress[id];if(!saved)return'';const parts=[];if(saved.score!=null)parts.push(`朗读 ${saved.score}分`);if(saved.questionResults?.length)parts.push(`问答 ${saved.questionScore||0}/6`);return parts.length?`<strong class="passage-score">${escapeHtml(parts.join(' · '))}</strong>`:''}
 function renderList(){
   const term=$('#searchInput').value.trim().toLowerCase();
-  const items=passages.filter(p=>matchesFilter(p)&&(`${p.title} ${p.topic} ${p.text}`.toLowerCase().includes(term)));
+  const items=passages.filter(p=>matchesFilter(p)&&(`${p.title} ${p.topic} ${p.text} ${(p.vocabulary||[]).map(item=>`${item.expression} ${item.meaning}`).join(' ')}`.toLowerCase().includes(term)));
+  const note=$('#vocabularyLibraryNote');note.hidden=!['中考词汇','高考词汇'].includes(filter);
+  note.textContent=note.hidden?'':`${filter} · ${passages.filter(p=>p.type===filter).length} 篇原创朗读短文 · 每篇 120–140 词，精选 20–30 个核心单词或短语。属于教学精选，非完整考纲词表。`;
   $('#passageList').innerHTML=items.map(p=>{const mine=p.type==='我的文章',info=submissionStatuses.get(p.id),status=info?.status||'';return`<div class="passage-card ${mine?'my-passage-card':''}"><a class="passage-item ${p.id===current.id?'active':''}" href="#practice/${encodeURIComponent(p.id)}" data-id="${escapeHtml(p.id)}"><small>${escapeHtml(displayType(p.type))}</small><b>${escapeHtml(p.title)}</b><span>${escapeHtml(p.year)} · ${escapeHtml(p.topic)} · ${escapeHtml(p.level)}${progress[p.id]?' · 已练习':''}</span>${scoreSummary(p.id)}</a>${mine?`<div class="passage-card-actions"><button data-edit="${escapeHtml(p.id)}">修改</button><button data-delete="${escapeHtml(p.id)}" class="delete-article-btn">删除</button><button data-submit="${escapeHtml(p.id)}" class="submit-article-btn" ${['submitted','published'].includes(status)?'disabled':''}>${escapeHtml(statusLabel(status))}</button></div>${info?.reviewNote?`<p class="passage-review-note">审核意见：${escapeHtml(info.reviewNote)}</p>`:''}`:''}</div>`}).join('')||'<p class="small">没有找到匹配内容</p>';
 }
 function openPassage(id){selectPassage(id);document.body.classList.add('practice-open');location.hash=`practice/${encodeURIComponent(current.id)}`;window.scrollTo({top:0,behavior:'smooth'})}
@@ -154,6 +165,7 @@ function selectPassage(id){
   $('#passageMeta').textContent=`${current.year} · ${current.topic} · ${current.level}`;
   const sentences=splitSentences(current.text); $('#passageText').innerHTML=sentences.map((s,i)=>`<span class="sentence" data-index="${i}">${escapeHtml(s)}</span>`).join('');
   $('#wordCount').textContent=current.text.trim().split(/\s+/).length;
+  renderCoreVocabulary();
   renderQuestions();
   restoreRecording();
   $('#favoriteBtn').textContent=favorites.has(id)?'♥':'♡';renderArticleVocabulary();
@@ -208,6 +220,12 @@ function vocabularyDetail(word,mode){
 }
 function vocabularyRows(words,mode,emptyText='还没有记录'){
   return words?.length?words.map(word=>`<div class="vocabulary-row"><button type="button" data-vocab-word="${escapeHtml(word)}" aria-label="朗读 ${escapeHtml(word)}">${escapeHtml(word)}</button><span>${escapeHtml(vocabularyDetail(word,mode))}</span></div>`).join(''):`<p>${emptyText}</p>`
+}
+function renderCoreVocabulary(){
+  const vocabulary=current.vocabulary||[],panel=$('#coreVocabularyPanel');
+  panel.hidden=!vocabulary.length;panel.open=false;
+  $('#coreVocabularyCount').textContent=vocabulary.length?`（${vocabulary.length} 项）`:'';
+  $('#coreVocabularyList').innerHTML=vocabulary.map(({expression,meaning})=>`<div><dt><button type="button" data-vocab-word="${escapeHtml(expression)}" aria-label="播放 ${escapeHtml(expression)} 的发音">${escapeHtml(expression)} <span aria-hidden="true">♫</span></button></dt><dd>${escapeHtml(meaning)}</dd></div>`).join('');
 }
 function renderArticleVocabulary(){
   const saved=progress[current.id]||{};$('#articlePronunciationWords').innerHTML=vocabularyRows(saved.unpronounceableWords,'pronunciation');$('#articleMeaningWords').innerHTML=vocabularyRows(saved.unknownWords,'meaning');$('#wordMarkStatus').textContent='尚未进入单词标记模式。';$('#finishWordMarkBtn').hidden=true;$('#markPronunciationBtn').classList.remove('active');$('#markMeaningBtn').classList.remove('active')
@@ -426,7 +444,7 @@ async function apiRequest(path,options={}){
 }
 function setSyncStatus(message,error=false){const box=$('#syncStatus');box.textContent=message;box.classList.toggle('error',error)}
 function cloudState(){return{articles:customPassages.filter(article=>!deletedArticleIds.has(article.id)),progress}}
-function hasActivePracticeInteraction(){return Boolean(wordMarkMode||answerActive||answerFinishing||recognitionActive||mediaRecorder?.state==='recording')}
+function hasActivePracticeInteraction(){return Boolean(wordMarkMode||answerActive||answerFinishing||recognitionActive||mediaRecorder?.state==='recording'||['#audioPlayback','#answerPlayback'].some(selector=>{const audio=$(selector);return audio&&!audio.paused&&!audio.ended}))}
 function mergeCloudState(remote={}){
   const publishedIds=new Map([...submissionStatuses.values()].filter(item=>item.status==='published').map(item=>[item.articleId,item.publicId]));
   const articles=new Map((remote.articles||[]).filter(item=>!publishedIds.has(item.id)&&!deletedArticleIds.has(item.id)).map(item=>[item.id,item]));customPassages.filter(item=>!publishedIds.has(item.id)&&!deletedArticleIds.has(item.id)).forEach(item=>articles.set(item.id,item));
