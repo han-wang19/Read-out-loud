@@ -104,3 +104,10 @@ body.practice-open .practice-shell{display:block;max-width:900px;margin:34px aut
 @media(max-width:560px){.article-vocabulary,.vocabulary-book-grid{grid-template-columns:1fr}.vocabulary-actions button{flex:1}.topbar-actions{gap:5px}.topbar-actions .account-btn{padding:7px 8px}}
 body:not(.practice-open) .my-passage-card .passage-item{border:0}
 @media(max-width:900px){body:not(.practice-open) .passage-card{min-width:0}}
+
+.vocabulary-study-list>li{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.vocabulary-study-answer{display:flex;align-items:center;gap:12px;flex:1;min-width:0;margin:0;padding:0;background:transparent;border:0}
+.vocabulary-study-meaning{flex:1;min-width:0}
+.vocabulary-study-actions{margin:0;flex-shrink:0}
+.vocabulary-study-actions button{padding:8px 10px;white-space:nowrap}
+@media(max-width:560px){.vocabulary-study-list>li{gap:6px}.vocabulary-study-word{font-size:18px;padding:4px}.vocabulary-study-answer{gap:6px;flex-wrap:wrap}.vocabulary-study-actions{gap:5px}.vocabulary-study-answer>.vocabulary-help{margin:0}}

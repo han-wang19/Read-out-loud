@@ -70,6 +70,7 @@ let wordMarkMode=null,wordMarkSelection=new Set();
 const savedProgress=readLocalJson('readingProgress',{});
 const progress=savedProgress&&typeof savedProgress==='object'&&!Array.isArray(savedProgress)?savedProgress:{};
 let vocabularyReview=window.VocabularyReview.clean(readLocalJson('readingVocabularyReview',{}));
+let vocabularyStudyCategory='pronunciation';
 let vocabularyStudyStage='new',vocabularyReveal=null,vocabularyRevealRequest=0;
 const savedFavorites=readLocalJson('readingFavorites',[]);
 const favorites=new Set(Array.isArray(savedFavorites)?savedFavorites:[]);
@@ -185,7 +186,8 @@ function renderQuestions(){
   box.innerHTML=`<ol>${questions.map(q=>`<li>${escapeHtml(q)}</li>`).join('')}</ol><p class="exam-question-note">仿真流程：逐题显示并朗读问题，每题限时 40 秒。浏览器根据语音识别文本与参考答案要点给出 0–2 分练习估分。</p>${canPractice?'<button id="startQuestionsBtn" class="primary-btn">开始回答问题</button>':'<p class="card-error">这篇文章没有完整参考答案，暂时不能自动评分。</p>'}${sourceUrl?`<p><a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer">查看资料依据与来源说明 ↗</a></p>`:''}`;
   if(canPractice)$('#startQuestionsBtn').onclick=startQuestionPractice;
 }
-function stopSpeech(){window.speechSynthesis?.cancel();utterance=null;$$('.sentence').forEach(s=>s.classList.remove('active'));$('#speakBtn').textContent='▶'}
+let wordPronunciationAudio=null;
+function stopSpeech(){if(wordPronunciationAudio){wordPronunciationAudio.pause();wordPronunciationAudio=null}window.speechSynthesis?.cancel();utterance=null;$$('.sentence').forEach(s=>s.classList.remove('active'));$('#speakBtn').textContent='▶'}
 function speak(){
   const synthesis=window.speechSynthesis,Utterance=window.SpeechSynthesisUtterance;if(!synthesis||!Utterance){toast('当前浏览器不支持示范朗读，请使用 Safari、Chrome 或 Edge');return}
   if(synthesis.speaking){stopSpeech();return}
@@ -207,6 +209,10 @@ function escapeHtml(value){const node=document.createElement('div');node.textCon
 function safeExternalUrl(value){try{const raw=String(value||'').trim();if(!raw)return'';const url=new URL(raw,location.href);return ['http:','https:'].includes(url.protocol)?url.href:''}catch{return''}}
 function speakWord(word){
   stopSpeech();
+  if(normalizeWord(word)==='wasted'){
+    const audio=new Audio('audio/wasted-us.mp3');wordPronunciationAudio=audio;
+    audio.play().catch(()=>{if(wordPronunciationAudio===audio){wordPronunciationAudio=null;toast('词典发音暂时无法播放，请重试')}});return;
+  }
   const synthesis=window.speechSynthesis,Utterance=window.SpeechSynthesisUtterance;if(!synthesis||!Utterance){toast('当前浏览器不支持单词发音');return}
   const voiceLine=new Utterance(word);voiceLine.lang='en-US';voiceLine.rate=.78;
   const voices=synthesis.getVoices();voiceLine.voice=voices.find(v=>v.lang==='en-US')||voices.find(v=>v.lang.startsWith('en'))||null;
@@ -244,10 +250,12 @@ function finishWordMark(){
   if(!wordMarkMode)return;const previous=progress[current.id]||{},key=wordMarkMode==='pronunciation'?'unpronounceableWords':'unknownWords';progress[current.id]={...previous,date:new Date().toISOString(),[key]:[...wordMarkSelection].sort()};localStorage.setItem('readingProgress',JSON.stringify(progress));wordMarkMode=null;$('#doneCount').textContent=Object.keys(progress).length;scheduleCloudSync();selectPassage(current.id);renderVocabularyBook();toast(cloudUser?'生词记录已保存并等待同步':'生词记录已保存在本机')
 }
 function renderVocabularyBook(){
-  const words=new Set(Object.keys(vocabularyReview));
-  Object.values(progress).forEach(item=>{[...(item.unpronounceableWords||[]),...(item.unknownWords||[])].forEach(word=>{const key=normalizeWord(word);if(key)words.add(key)})});
+  const words=new Set();
+  const categoryKey=vocabularyStudyCategory==='pronunciation'?'unpronounceableWords':'unknownWords';
+  Object.values(progress).forEach(item=>{(item[categoryKey]||[]).forEach(word=>{const key=normalizeWord(word);if(key)words.add(key)})});
+  $$('[data-review-category]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.reviewCategory===vocabularyStudyCategory)));
   const lists={new:[],review:[],mastered:[]};
-  [...words].sort().forEach(word=>lists[window.VocabularyReview.record(vocabularyReview,word).stage].push(word));
+  [...words].sort((a,b)=>window.VocabularyReview.record(vocabularyReview,a).updatedAt.localeCompare(window.VocabularyReview.record(vocabularyReview,b).updatedAt)||a.localeCompare(b)).forEach(word=>lists[window.VocabularyReview.record(vocabularyReview,word).stage].push(word));
   const labels={new:'新学',review:'复习',mastered:'已掌握'};
   for(const [stage,id] of Object.entries({new:'New',review:'Review',mastered:'Mastered'}))$('#vocabulary'+id+'Count').textContent=lists[stage].length;
   $$('[data-review-stage]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.reviewStage===vocabularyStudyStage)));
@@ -770,6 +778,7 @@ $('#passageList').addEventListener('click',event=>{const edit=event.target.close
 $('#passageText').addEventListener('click',e=>{const marked=e.target.closest('[data-mark-word]');if(marked&&wordMarkMode){toggleMarkedWord(marked);return}const word=e.target.closest('.word');if(word)showWordCard(word.textContent,word.getBoundingClientRect())});
 $('#passageText').addEventListener('keydown',e=>{if(!['Enter',' '].includes(e.key))return;const marked=e.target.closest('[data-mark-word]');if(marked&&wordMarkMode){e.preventDefault();toggleMarkedWord(marked);return}if(e.target.matches('.word')){e.preventDefault();showWordCard(e.target.textContent,e.target.getBoundingClientRect())}});
 document.addEventListener('click',event=>{
+  const category=event.target.closest('[data-review-category]');if(category){vocabularyStudyCategory=category.dataset.reviewCategory;switchVocabularyStage(vocabularyStudyStage);return}
   const stage=event.target.closest('[data-review-stage]');if(stage){switchVocabularyStage(stage.dataset.reviewStage);return}
   const review=event.target.closest('[data-review-word]');if(review){revealVocabularyWord(review.dataset.reviewWord);return}
   const answer=event.target.closest('[data-review-answer]');if(answer){answerVocabularyReview(answer.dataset.reviewAnswer==='remembered');return}

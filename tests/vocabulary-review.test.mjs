@@ -10,6 +10,28 @@ const review = context.window.VocabularyReview
 const plain = value => JSON.parse(JSON.stringify(value))
 const record = (stage, streak, updatedAt='2026-10-26T00:00:00.000Z') => ({stage,streak,updatedAt})
 
+test('book separates marking categories and moves forgotten words to the end', () => {
+  const app = readFileSync(new URL('../reading-practice/app.js', import.meta.url), 'utf8')
+  const nodes = new Map()
+  const ui = vm.createContext({window:{VocabularyReview:review},
+    progress:{article:{unpronounceableWords:['apple','cat'],unknownWords:['book','cat']}},
+    vocabularyReview:{},vocabularyStudyCategory:'pronunciation',vocabularyStudyStage:'new',vocabularyReveal:null,
+    normalizeWord:word=>word,escapeHtml:word=>word,$$:()=>[],
+    $:id=>{if(!nodes.has(id))nodes.set(id,{setAttribute(){}});return nodes.get(id)},
+  })
+  vm.runInContext(app.slice(app.indexOf('function renderVocabularyBook('),app.indexOf('function switchVocabularyStage(')),ui)
+  ui.renderVocabularyBook()
+  const list=()=>nodes.get('#vocabularyStudyList').innerHTML
+  assert.match(list(),/data-review-word="apple"/)
+  assert.doesNotMatch(list(),/data-review-word="book"/)
+  ui.vocabularyReview.apple=review.answer(undefined,false)
+  ui.renderVocabularyBook()
+  assert.ok(list().indexOf('data-review-word="cat"')<list().indexOf('data-review-word="apple"'))
+  ui.vocabularyStudyCategory='meaning';ui.renderVocabularyBook()
+  assert.match(list(),/data-review-word="book"/)
+  assert.doesNotMatch(list(),/data-review-word="apple"/)
+})
+
 test('new forgotten words stay new; first remembered answer starts review at zero', () => {
   const first = review.answer(undefined, false)
   assert.equal(first.stage, 'new'); assert.equal(first.streak, 0)

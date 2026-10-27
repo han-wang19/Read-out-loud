@@ -131,6 +131,10 @@
       <span class="eyebrow">MY VOCABULARY BOOK</span>
       <h2 id="vocabBookTitle">我的生词本</h2>
       <p class="account-intro">汇总所有文章中标记的“不会读”和“不认识”的单词。先看英文回想词义，再点击单词听发音、看汉译。</p>
+      <div class="vocabulary-study-tabs" role="group" aria-label="单词分类">
+        <button type="button" data-review-category="pronunciation" aria-pressed="true">不会读</button>
+        <button type="button" data-review-category="meaning" aria-pressed="false">不认识</button>
+      </div>
       <div class="vocabulary-study-tabs" role="group" aria-label="学习阶段">
         <button type="button" data-review-stage="new" aria-pressed="true">新学 <span id="vocabularyNewCount">0</span></button>
         <button type="button" data-review-stage="review" aria-pressed="false">复习 <span id="vocabularyReviewCount">0</span></button>
