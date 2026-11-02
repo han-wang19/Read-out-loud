@@ -71,6 +71,7 @@ const savedProgress=readLocalJson('readingProgress',{});
 const progress=savedProgress&&typeof savedProgress==='object'&&!Array.isArray(savedProgress)?savedProgress:{};
 let vocabularyReview=window.VocabularyReview.clean(readLocalJson('readingVocabularyReview',{}));
 let vocabularyStudyCategory='pronunciation';
+let vocabularyToday=false;
 let vocabularyStudyStage='new',vocabularyReveal=null,vocabularyRevealRequest=0;
 const savedFavorites=readLocalJson('readingFavorites',[]);
 const favorites=new Set(Array.isArray(savedFavorites)?savedFavorites:[]);
@@ -254,20 +255,25 @@ function renderVocabularyBook(){
   const categoryKey=vocabularyStudyCategory==='pronunciation'?'unpronounceableWords':'unknownWords';
   Object.values(progress).forEach(item=>{(item[categoryKey]||[]).forEach(word=>{const key=normalizeWord(word);if(key)words.add(key)})});
   $$('[data-review-category]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.reviewCategory===vocabularyStudyCategory)));
-  const lists={new:[],review:[],mastered:[]};
+  const lists={new:[],review1:[],review2:[],review3:[],mastered:[]};
   [...words].sort((a,b)=>window.VocabularyReview.record(vocabularyReview,a).updatedAt.localeCompare(window.VocabularyReview.record(vocabularyReview,b).updatedAt)||a.localeCompare(b)).forEach(word=>lists[window.VocabularyReview.record(vocabularyReview,word).stage].push(word));
-  const labels={new:'新学',review:'复习',mastered:'已掌握'};
-  for(const [stage,id] of Object.entries({new:'New',review:'Review',mastered:'Mastered'}))$('#vocabulary'+id+'Count').textContent=lists[stage].length;
+  let initialized=false;
+  for(const word of words)if(!Object.hasOwn(vocabularyReview,word)){vocabularyReview[word]=window.VocabularyReview.record({},word);vocabularyReview[word].updatedAt=new Date().toISOString();initialized=true}
+  if(initialized){localStorage.setItem('readingVocabularyReview',JSON.stringify(vocabularyReview));scheduleCloudSync()}
+  if(vocabularyToday)for(const stage of Object.keys(lists))lists[stage]=lists[stage].filter(word=>window.VocabularyReview.due(vocabularyReview[word]));
+  const labels={new:'\u65b0\u5b66',review1:'\u590d\u4e601',review2:'\u590d\u4e602',review3:'\u590d\u4e603',mastered:'\u5df2\u638c\u63e1'};
+  for(const stage of Object.keys(lists))document.querySelector(`[data-review-stage="${stage}"] span`).textContent=lists[stage].length;
   $$('[data-review-stage]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.reviewStage===vocabularyStudyStage)));
-  $('#vocabularyStudyHint').textContent={new:'选择“记得”后移入复习；选择“不记得”则留在新学。',review:'每次先回想，再点击查看。连续3次选择“记得”后移入已掌握；“不记得”会将连续次数清零，留在复习。',mastered:'这里的单词已连续复习答对3次。点击单词仍可听发音、查看汉译。'}[vocabularyStudyStage];
+  $$('[data-review-scope]').forEach(button=>button.setAttribute('aria-pressed',String((button.dataset.reviewScope==='today')===vocabularyToday)));
+  $('#vocabularyStudyHint').textContent='\u8bb0\u5f97\u5347\u4e00\u7ea7\uff08\u6bcf\u65e5\u6700\u591a\u4e00\u6b21\uff09\uff0c\u4e0d\u8bb0\u5f97\u9000\u4e00\u7ea7\uff1b\u65b0\u5b66\u4e0d\u8bb0\u5f97\u6392\u5230\u6700\u540e\u3002';
   if(vocabularyReveal){const record=window.VocabularyReview.record(vocabularyReview,vocabularyReveal.word);if(!lists[vocabularyStudyStage].includes(vocabularyReveal.word)||record.updatedAt!==vocabularyReveal.updatedAt)vocabularyReveal=null}
   const list=$('#vocabularyStudyList');list.setAttribute('aria-label',labels[vocabularyStudyStage]+'单词');
   list.innerHTML=lists[vocabularyStudyStage].map(word=>{
     const reveal=vocabularyReveal?.word===word?vocabularyReveal:null,record=window.VocabularyReview.record(vocabularyReview,word);
-    return `<li><button type="button" class="vocabulary-study-word" data-review-word="${escapeHtml(word)}" aria-expanded="${Boolean(reveal)}">${escapeHtml(word)}</button>${reveal?`<div class="vocabulary-study-answer"><p class="vocabulary-study-meaning" aria-live="polite">${escapeHtml(reveal.meaning)}</p>${vocabularyStudyStage==='review'?`<p class="vocabulary-help">连续记得 ${record.streak} / 3 次</p>`:''}${vocabularyStudyStage!=='mastered'?`<div class="vocabulary-study-actions"><button type="button" data-review-answer="remembered" ${reveal.ready?'':'disabled'}>记得</button><button type="button" data-review-answer="forgotten" ${reveal.ready?'':'disabled'}>不记得</button></div>`:''}</div>`:''}</li>`;
-  }).join('')||`<li class="vocabulary-study-empty">${{new:'暂无新学单词。可在文章中标记“不会读”或“不认识”的单词。',review:'暂无复习单词。在新学列表选择“记得”后，单词会来到这里。',mastered:'暂无已掌握单词。复习列表中的单词连续答对3次后会来到这里。'}[vocabularyStudyStage]}</li>`;
+    return `<li><button type="button" class="vocabulary-study-word" data-review-word="${escapeHtml(word)}" aria-expanded="${Boolean(reveal)}">${escapeHtml(word)}</button>${reveal?`<div class="vocabulary-study-answer"><p class="vocabulary-study-meaning" aria-live="polite">${escapeHtml(reveal.meaning)}</p><p class="vocabulary-help">${escapeHtml(record.enteredOn)} \u8fdb\u5165\u672c\u5c42\u7ea7</p><div class="vocabulary-study-actions">${vocabularyStudyStage!=='mastered'?`<button type="button" data-review-answer="remembered" ${record.lastAdvancedOn===window.VocabularyReview.day()?'disabled':''}>\u8bb0\u5f97</button>`:''}<button type="button" data-review-answer="forgotten">\u4e0d\u8bb0\u5f97</button></div></div>`:''}</li>`;
+  }).join('')||`<li class="vocabulary-study-empty">${vocabularyToday?'\u672c\u5c42\u7ea7\u4eca\u65e5\u5355\u8bcd\u5df2\u6e05\u7a7a':'\u6682\u65e0\u5355\u8bcd'}</li>`;
 }
-function switchVocabularyStage(stage){if(!['new','review','mastered'].includes(stage))return;vocabularyStudyStage=stage;vocabularyReveal=null;++vocabularyRevealRequest;$('#vocabularyStudyStatus').textContent='';renderVocabularyBook()}
+function switchVocabularyStage(stage){if(!window.VocabularyReview.stages.includes(stage))return;vocabularyStudyStage=stage;vocabularyReveal=null;++vocabularyRevealRequest;$('#vocabularyStudyStatus').textContent='';renderVocabularyBook()}
 async function revealVocabularyWord(word){
   const request=++vocabularyRevealRequest,record=window.VocabularyReview.record(vocabularyReview,word);
   if(record.stage!==vocabularyStudyStage)return;
@@ -284,14 +290,14 @@ async function revealVocabularyWord(word){
   }catch{if(request===vocabularyRevealRequest&&vocabularyReveal===reveal){reveal.meaning='未能获取汉译，请再次点击单词重试。';renderVocabularyBook()}}
 }
 function answerVocabularyReview(remembered){
-  const reveal=vocabularyReveal;if(!reveal?.ready||vocabularyStudyStage==='mastered')return;
+  const reveal=vocabularyReveal;if(!reveal)return;
   const previous=window.VocabularyReview.record(vocabularyReview,reveal.word);
   if(previous.updatedAt!==reveal.updatedAt||previous.stage!==vocabularyStudyStage){vocabularyReveal=null;renderVocabularyBook();return}
   const next=window.VocabularyReview.answer(previous,remembered);
   const updated={...vocabularyReview,[reveal.word]:next};
   try{localStorage.setItem('readingVocabularyReview',JSON.stringify(updated))}catch{toast('学习进度保存失败，请检查浏览器存储空间后重试');return}
   vocabularyReview=updated;vocabularyReveal=null;++vocabularyRevealRequest;renderVocabularyBook();scheduleCloudSync();
-  $('#vocabularyStudyStatus').textContent=next.stage==='mastered'?`${reveal.word} 已移入已掌握。`:previous.stage==='new'&&remembered?`${reveal.word} 已移入复习。`:remembered?`${reveal.word} 连续记得 ${next.streak} / 3 次。`:`${reveal.word} ${previous.stage==='new'?'仍在新学列表':'连续次数已清零，留在复习列表'}。`;
+  $('#vocabularyStudyStatus').textContent='';
 }
 function openVocabularyBook(){closeLearningCard();vocabularyReveal=null;++vocabularyRevealRequest;$('#vocabularyStudyStatus').textContent='';renderVocabularyBook();$('#vocabBookModal').hidden=false}
 function closeVocabularyBook(){vocabularyReveal=null;++vocabularyRevealRequest;$('#vocabBookModal').hidden=true}
@@ -328,6 +334,7 @@ async function translateToChinese(text){
   translationCache.set(key,translated);return translated;
 }
 async function getWordDetails(word){
+  const local=getLocalWordDetails(word);if(local)return local;
   const key=word.toLowerCase();if(lookupCache.has(key))return lookupCache.get(key);
   const [dictionary,translated]=await Promise.allSettled([
     fetchJson(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(key)}`),
@@ -340,11 +347,26 @@ async function getWordDetails(word){
 }
 function getLocalWordDetails(word){
   const key=word.toLowerCase().replace(/’/g,"'");
-  const candidates=[key,key.replace(/'s$/,''),key.replace(/ies$/,'y'),key.replace(/es$/,''),key.replace(/s$/,''),key.replace(/ing$/,''),key.replace(/ing$/,'e'),key.replace(/ed$/,''),key.replace(/ed$/,'e')];
-  const exact=window.LOCAL_DICTIONARY?.[key];
-  const fallback=candidates.map(item=>window.LOCAL_DICTIONARY?.[item]).find(Boolean);
-  if(!exact&&!fallback)return null;
-  const source=exact||fallback,phoneticSource=candidates.map(item=>window.LOCAL_DICTIONARY?.[item]).find(item=>item?.phonetic);
+  const dict=window.LOCAL_DICTIONARY||{};
+  const irregular={am:'be',is:'be',are:'be',was:'be',were:'be',been:'be',being:'be',has:'have',had:'have',does:'do',did:'do',done:'do',went:'go',gone:'go',got:'get',gotten:'get',made:'make',took:'take',taken:'take',saw:'see',seen:'see',said:'say',bought:'buy',brought:'bring',thought:'think',felt:'feel',found:'find',knew:'know',known:'know',gave:'give',given:'give',wrote:'write',written:'write',ran:'run',ate:'eat',eaten:'eat',spoke:'speak',spoken:'speak',left:'leave',told:'tell',children:'child',men:'man',women:'woman',feet:'foot',teeth:'tooth',mice:'mouse'};
+  const candidates=[key.replace(/'s$/,'')];
+  if(irregular[key])candidates.unshift(irregular[key]);
+  if(/ies$/.test(key))candidates.push(key.slice(0,-3)+'y');
+  if(/ied$/.test(key))candidates.push(key.slice(0,-3)+'y');
+  if(/(?:ches|shes|sses|xes|zes|oes)$/.test(key))candidates.push(key.slice(0,-2));
+  if(/s$/.test(key)&&!/ss$/.test(key))candidates.push(key.slice(0,-1));
+  if(/(?:ing|ed)$/.test(key)){
+    const stem=key.replace(/(?:ing|ed)$/,'');
+    candidates.push(stem+'e',stem);
+    if(/([b-df-hj-np-tv-z])\1$/.test(stem))candidates.push(stem.slice(0,-1));
+  }
+  const exact=dict[key];
+  const base=candidates.filter(item=>item!==key).find(item=>dict[item]?.chinese);
+  // Inflected entries often only say ?past tense of ??; show the lemma's senses.
+  const reference=exact?.chinese?.match(/\b([a-z]+)\u7684(?:\u8fc7\u53bb|\u73b0\u5728|\u7b2c\u4e09|\u590d\u6570)/i)?.[1];
+  const source=(reference&&dict[reference])||(irregular[key]&&dict[irregular[key]])||exact||(base&&dict[base]);
+  if(!source)return null;
+  const phoneticSource=exact?.phonetic?exact:source;
   const pronunciation=source.phonetic||phoneticSource?.phonetic||'暂无音标';
   return {phonetic:pronunciation,chinese:source.chinese||'本地词库暂无中文释义',meanings:(source.definitions||[]).map(definition=>({part:'',definition}))};
 }
@@ -778,6 +800,7 @@ $('#passageList').addEventListener('click',event=>{const edit=event.target.close
 $('#passageText').addEventListener('click',e=>{const marked=e.target.closest('[data-mark-word]');if(marked&&wordMarkMode){toggleMarkedWord(marked);return}const word=e.target.closest('.word');if(word)showWordCard(word.textContent,word.getBoundingClientRect())});
 $('#passageText').addEventListener('keydown',e=>{if(!['Enter',' '].includes(e.key))return;const marked=e.target.closest('[data-mark-word]');if(marked&&wordMarkMode){e.preventDefault();toggleMarkedWord(marked);return}if(e.target.matches('.word')){e.preventDefault();showWordCard(e.target.textContent,e.target.getBoundingClientRect())}});
 document.addEventListener('click',event=>{
+  const scope=event.target.closest('[data-review-scope]');if(scope){vocabularyToday=scope.dataset.reviewScope==='today';switchVocabularyStage('new');return}
   const category=event.target.closest('[data-review-category]');if(category){vocabularyStudyCategory=category.dataset.reviewCategory;switchVocabularyStage(vocabularyStudyStage);return}
   const stage=event.target.closest('[data-review-stage]');if(stage){switchVocabularyStage(stage.dataset.reviewStage);return}
   const review=event.target.closest('[data-review-word]');if(review){revealVocabularyWord(review.dataset.reviewWord);return}
