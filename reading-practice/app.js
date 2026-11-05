@@ -83,7 +83,11 @@ let cloudUser = null, cloudSyncTimer = null, cloudSyncInterval = null, cloudSync
 // while the automatic sync was still in flight).
 const deletedArticleIds = new Set();
 const submissionStatuses = new Map();
-const publicPassageIds = new Set();
+const cachedPublicLibrary=readLocalJson('readingPublicLibrary',[]);
+const cachedPublicArticles=Array.isArray(cachedPublicLibrary)?cachedPublicLibrary.filter(item=>item?.id&&item?.title&&item?.text):[];
+const publicPassageIds = new Set(cachedPublicArticles.map(item=>item.id));
+for(const article of cachedPublicArticles){const existing=passages.find(item=>item.id===article.id);if(existing)Object.assign(existing,article);else passages.push(article)}
+let publicLibraryPromise=null,publicLibraryLoadedAt=0;
 let ocrWorker = null, ocrWorkerPromise = null, ocrAssetsPromise = null, ocrRunId = 0, ocrWorkerGeneration = 0;
 let ocrProgressReporter = () => {};
 
@@ -270,7 +274,7 @@ function renderVocabularyBook(){
   const list=$('#vocabularyStudyList');list.setAttribute('aria-label',labels[vocabularyStudyStage]+'单词');
   list.innerHTML=lists[vocabularyStudyStage].map(word=>{
     const reveal=vocabularyReveal?.word===word?vocabularyReveal:null,record=window.VocabularyReview.record(vocabularyReview,word);
-    return `<li><button type="button" class="vocabulary-study-word" data-review-word="${escapeHtml(word)}" aria-expanded="${Boolean(reveal)}">${escapeHtml(word)}</button>${reveal?`<div class="vocabulary-study-answer"><p class="vocabulary-study-meaning" aria-live="polite">${escapeHtml(reveal.meaning)}</p><p class="vocabulary-help">${escapeHtml(record.enteredOn)} \u8fdb\u5165\u672c\u5c42\u7ea7</p><div class="vocabulary-study-actions">${vocabularyStudyStage!=='mastered'?`<button type="button" data-review-answer="remembered" ${record.lastAdvancedOn===window.VocabularyReview.day()?'disabled':''}>\u8bb0\u5f97</button>`:''}<button type="button" data-review-answer="forgotten">\u4e0d\u8bb0\u5f97</button></div></div>`:''}</li>`;
+    return `<li><button type="button" class="vocabulary-study-word" data-review-word="${escapeHtml(word)}" aria-expanded="${Boolean(reveal)}">${escapeHtml(word)}</button>${reveal?`<div class="vocabulary-study-answer"><p class="vocabulary-study-meaning" aria-live="polite">${escapeHtml(reveal.meaning)}</p><p class="vocabulary-help">${escapeHtml(record.enteredOn)} \u8fdb\u5165\u672c\u5c42\u7ea7</p><div class="vocabulary-study-actions">${vocabularyStudyStage!=='mastered'?`<button type="button" data-review-answer="remembered" ${!reveal.ready||record.lastAdvancedOn===window.VocabularyReview.day()?'disabled':''}>\u8bb0\u5f97</button>`:''}<button type="button" data-review-answer="forgotten" ${!reveal.ready?'disabled':''}>\u4e0d\u8bb0\u5f97</button></div></div>`:''}</li>`;
   }).join('')||`<li class="vocabulary-study-empty">${vocabularyToday?'\u672c\u5c42\u7ea7\u4eca\u65e5\u5355\u8bcd\u5df2\u6e05\u7a7a':'\u6682\u65e0\u5355\u8bcd'}</li>`;
 }
 function switchVocabularyStage(stage){if(!window.VocabularyReview.stages.includes(stage))return;vocabularyStudyStage=stage;vocabularyReveal=null;++vocabularyRevealRequest;$('#vocabularyStudyStatus').textContent='';renderVocabularyBook()}
@@ -290,7 +294,7 @@ async function revealVocabularyWord(word){
   }catch{if(request===vocabularyRevealRequest&&vocabularyReveal===reveal){reveal.meaning='未能获取汉译，请再次点击单词重试。';renderVocabularyBook()}}
 }
 function answerVocabularyReview(remembered){
-  const reveal=vocabularyReveal;if(!reveal)return;
+  const reveal=vocabularyReveal;if(!reveal?.ready)return;
   const previous=window.VocabularyReview.record(vocabularyReview,reveal.word);
   if(previous.updatedAt!==reveal.updatedAt||previous.stage!==vocabularyStudyStage){vocabularyReveal=null;renderVocabularyBook();return}
   const next=window.VocabularyReview.answer(previous,remembered);
@@ -605,13 +609,21 @@ async function logout(){
 async function restoreSession(){
   try{const data=await apiRequest('/api/auth/me');cloudUser=data.user;renderAccount();if(cloudUser){startAutomaticSync();await syncCloudData()}}catch{cloudUser=null;stopAutomaticSync();renderAccount()}
 }
-async function loadPublicLibrary(){
+function loadPublicLibrary(){
+  if(publicLibraryPromise)return publicLibraryPromise;
+  if(publicLibraryLoadedAt&&Date.now()-publicLibraryLoadedAt<30000)return Promise.resolve();
+  publicLibraryPromise=refreshPublicLibrary().finally(()=>{publicLibraryPromise=null});
+  return publicLibraryPromise;
+}
+async function refreshPublicLibrary(){
   try{
     const data=await apiRequest('/api/library'),articles=Array.isArray(data.articles)?data.articles:[],remoteIds=new Set(articles.map(item=>item.id));
     for(let i=passages.length-1;i>=0;i--)if(publicPassageIds.has(passages[i].id)&&!remoteIds.has(passages[i].id))passages.splice(i,1);
     const known=new Map(passages.map(item=>[item.id,item]));
     articles.forEach(article=>{const existing=known.get(article.id);if(existing)Object.assign(existing,article);else passages.push(article)});
     publicPassageIds.clear();remoteIds.forEach(id=>publicPassageIds.add(id));
+    publicLibraryLoadedAt=Date.now();
+    try{localStorage.setItem('readingPublicLibrary',JSON.stringify(articles))}catch{}
     $('#totalCount').textContent=passages.length;
     if(!passages.includes(current))selectPassage(passages[0].id);else renderList();restorePracticeRoute()
   }catch{}
