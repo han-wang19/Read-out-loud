@@ -154,6 +154,15 @@
       <button id="customModalClose" class="learning-card-close" aria-label="关闭">×</button>
       <span class="eyebrow">CREATE YOUR PRACTICE</span>
       <h2 id="customModalTitle">添加自己的朗读文章</h2>
+      <fieldset class="custom-question-fields" id="wordGenerator">
+        <legend>用单词生成短文</legend>
+        <p>输入单词，或上传 UTF-8 TXT/CSV 文件（只含英文词条，用逗号、分号或换行分隔）。每次 3–30 项。生成后可编辑，再保存为朗读练习。需要登录。</p>
+        <label class="form-field"><span>目标单词或短语</span><textarea id="generatorWords" maxlength="3000" placeholder="protect, environment, volunteer"></textarea></label>
+        <label class="form-field"><span>上传词表</span><input id="generatorFile" type="file" accept=".txt,.csv,text/plain,text/csv"></label>
+        <label class="form-field"><span>文章难度</span><select id="generatorLevel"><option value="junior">中考（120–160词）</option><option value="senior">高考（180–240词）</option></select></label>
+        <button id="generatePassageBtn" type="button" class="primary-btn">生成短文</button>
+        <p id="generatorStatus" role="status" aria-live="polite"></p>
+      </fieldset>
       <label class="form-field"><span>文章标题（可选）</span><input id="customTitle" maxlength="80" placeholder="例如：My Reading Practice"></label>
       <label class="form-field"><span>粘贴或输入英文文章</span><textarea id="customText" maxlength="12000" placeholder="Paste or type an English passage here..."></textarea></label>
       <fieldset class="custom-question-fields">
@@ -216,6 +225,6 @@
   <script src="local-translations.js"></script>
   <script src="vocabulary-passages.js?v=1"></script>
   <script src="vocabulary-review.js?v=1"></script>
-  <script src="app.js?v=18"></script>
+  <script src="app.js?v=19"></script>
 </body>
 </html>

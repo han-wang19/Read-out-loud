@@ -418,7 +418,7 @@ function handleTextSelection(){
   },0);
 }
 
-function resetCustomForm(){editingPassageId=null;$('#customTitle').value='';$('#customText').value='';[1,2,3].forEach(i=>{$(`#customQuestion${i}`).value='';$(`#customAnswer${i}`).value=''});clearPhotoSelection($('#ocrStatus').dataset.running==='true');$('#customModalTitle').textContent='添加自己的朗读文章';$('#createPracticeBtn').textContent='保存文章'}
+function resetCustomForm(){generationRun++;$('#generatorStatus').textContent='';editingPassageId=null;$('#customTitle').value='';$('#customText').value='';[1,2,3].forEach(i=>{$(`#customQuestion${i}`).value='';$(`#customAnswer${i}`).value=''});clearPhotoSelection($('#ocrStatus').dataset.running==='true');$('#customModalTitle').textContent='添加自己的朗读文章';$('#createPracticeBtn').textContent='保存文章'}
 function openCustomModal(article=null){
   resetCustomForm();
   if(article){editingPassageId=article.id;$('#customModalTitle').textContent='修改我的文章与问答';$('#createPracticeBtn').textContent='保存修改';$('#customTitle').value=article.title||'';$('#customText').value=article.text||'';[1,2,3].forEach((i,index)=>{$(`#customQuestion${i}`).value=article.questions?.[index]||'';$(`#customAnswer${i}`).value=article.answers?.[index]||''})}
@@ -835,3 +835,22 @@ $('#largerBtn').onclick=()=>{const e=$('#passageText'),n=Math.min(34,parseFloat(
 $('#smallerBtn').onclick=()=>{const e=$('#passageText'),n=Math.max(17,parseFloat(getComputedStyle(e).fontSize)-2);e.style.fontSize=n+'px'};
 $('#focusBtn').onclick=()=>document.body.classList.toggle('focus');$('#themeBtn').onclick=()=>{document.body.classList.toggle('dark');localStorage.setItem('readingTheme',document.body.classList.contains('dark')?'dark':'light')};
 if(localStorage.getItem('readingTheme')==='dark')document.body.classList.add('dark');$('#totalCount').textContent=passages.length;$('#doneCount').textContent=Object.keys(progress).length;renderList();selectPassage(current.id);restorePracticeRoute();renderAccount();renderVocabularyBook();restoreSession();loadPublicLibrary();
+
+let generationRun = 0;
+$('#generatorFile').onchange=async event=>{
+  const file=event.target.files[0];if(!file)return;
+  try{if(file.size>50000)throw new Error('词表文件请小于 50 KB');$('#generatorWords').value=await file.text();$('#generatorStatus').textContent='词表已读取，请检查后生成。'}catch(error){$('#generatorStatus').textContent=error.message}finally{event.target.value=''}
+};
+$('#generatePassageBtn').onclick=async()=>{
+  const button=$('#generatePassageBtn'),status=$('#generatorStatus');
+  if(!cloudUser){status.textContent='请先通过账号入口登录，再生成短文。';return}
+  if(editingPassageId&&!confirm('生成内容将替换当前编辑框中的文章和问答，是否继续？'))return;
+  const run=++generationRun;button.disabled=true;status.textContent='正在写作并检查目标词覆盖，请稍候…';
+  try{
+    const result=await apiRequest('/api/generate-passage',{method:'POST',body:JSON.stringify({words:$('#generatorWords').value,level:$('#generatorLevel').value})});
+    if(run!==generationRun||$('#customModal').hidden)return;
+    $('#customTitle').value=result.title;$('#customText').value=result.text;
+    [1,2,3].forEach((i,index)=>{$(`#customQuestion${i}`).value=result.questions[index];$(`#customAnswer${i}`).value=result.answers[index]});
+    status.textContent=`已生成${result.level==='junior'?'中考':'高考'}难度短文，全部 ${result.words.length} 个目标词已覆盖。请检查内容，再点击保存文章。`;
+  }catch(error){if(run===generationRun)status.textContent=error.message}finally{button.disabled=false}
+};
